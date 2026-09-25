@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { convertSvg, toDotLottie, type ConversionResult, type ConversionWarning } from '@svg2lottie/core';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { convertSvg, toDotLottie, type ConversionResult } from '@svg2lottie/core';
+import { UploadIcon } from './icons';
+import { Landing, EXAMPLES } from './Landing';
 import { DotLottiePreview, LottieWebPreview, SvgPreview } from './previews';
+import { Report } from './Report';
+import { SwipeCompare } from './SwipeCompare';
+import { Transport } from './Transport';
 import { usePlayback } from './usePlayback';
 
-const examples = import.meta.glob('../../../packages/core/test/fixtures/*.svg', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
-const EXAMPLES = Object.entries(examples)
-  .map(([path, svg]) => ({ name: path.split('/').pop()!.replace(/\.svg$/, ''), svg }))
-  .sort((a, b) => (a.name === 'figma-motion-sample' ? -1 : b.name === 'figma-motion-sample' ? 1 : a.name.localeCompare(b.name)));
-
-type PlayerMode = 'lottie-web' | 'dotlottie' | 'both';
+export type PlayerMode = 'lottie-web' | 'dotlottie' | 'both';
+type ViewMode = 'side' | 'swipe';
 type Backdrop = 'checker' | 'dark' | 'light';
 
 interface Loaded {
@@ -16,7 +17,7 @@ interface Loaded {
   svg: string;
 }
 
-function formatBytes(n: number): string {
+export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
@@ -35,18 +36,27 @@ export function App() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [fps, setFps] = useState(60);
   const [blur, setBlur] = useState(true);
-  const [mode, setMode] = useState<PlayerMode>('lottie-web');
+  const [player, setPlayer] = useState<PlayerMode>('lottie-web');
+  const [view, setView] = useState<ViewMode>('side');
   const [backdrop, setBackdrop] = useState<Backdrop>('checker');
   const [dragging, setDragging] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
 
-  const conversion = useMemo((): { result?: ConversionResult; json?: string; dot?: Uint8Array; error?: string } => {
+  const notify = useCallback((text: string, tone: 'ok' | 'err' = 'ok') => {
+    setToast({ text, tone });
+    window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), 2600);
+  }, []);
+
+  const conversion = useMemo((): { result?: ConversionResult; json?: string; dot?: Uint8Array; error?: string; ms?: number } => {
     if (!loaded) return {};
+    const started = performance.now();
     try {
       const result = convertSvg(loaded.svg, { fps, blur, name: loaded.name });
       const json = JSON.stringify(result.animation);
-      return { result, json, dot: toDotLottie(result.animation, { id: loaded.name }) };
+      const dot = toDotLottie(result.animation, { id: loaded.name });
+      return { result, json, dot, ms: performance.now() - started };
     } catch (e) {
       return { error: (e as Error).message };
     }
@@ -56,21 +66,17 @@ export function App() {
   const totalFrames = result?.stats.frames ?? 1;
   const playback = usePlayback(totalFrames, fps);
 
-  const openFile = useCallback(async (file: File | undefined) => {
-    if (!file) return;
-    if (!/\.svg$/i.test(file.name) && file.type !== 'image/svg+xml') {
-      setLoadError(`"${file.name}" is not an SVG file.`);
-      return;
-    }
-    setLoadError(null);
-    setLoaded({ name: file.name.replace(/\.svg$/i, ''), svg: await file.text() });
-  }, []);
-
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    void openFile(e.dataTransfer.files[0]);
-  };
+  const openFile = useCallback(
+    async (file: File | undefined) => {
+      if (!file) return;
+      if (!/\.svg$/i.test(file.name) && file.type !== 'image/svg+xml') {
+        notify(`"${file.name}" is not an SVG file`, 'err');
+        return;
+      }
+      setLoaded({ name: file.name.replace(/\.svg$/i, ''), svg: await file.text() });
+    },
+    [notify],
+  );
 
   useEffect(() => {
     const prevent = (e: globalThis.DragEvent) => e.preventDefault();
@@ -82,93 +88,145 @@ export function App() {
     };
   }, []);
 
-  const aspect = result ? `${result.stats.width} / ${result.stats.height}` : '1 / 1';
-  const frameInt = Math.floor(playback.frame);
+  useEffect(() => {
+    if (!result) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('select, input[type="text"], textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault();
+        playback.setPlaying(!playback.playing);
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        playback.step((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1));
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        playback.setPlaying(false);
+        playback.seek(e.key === 'Home' ? 0 : totalFrames - 1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [result, playback, totalFrames]);
+
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    void openFile(e.dataTransfer.files[0]);
+  };
+
+  const ratio = result ? result.stats.width / result.stats.height : 1;
+  const effectivePlayer: PlayerMode = view === 'swipe' && player === 'both' ? 'lottie-web' : player;
+
+  const lottieView = (which: 'lottie-web' | 'dotlottie') =>
+    which === 'lottie-web' ? (
+      <LottieWebPreview animation={result!.animation} frame={playback.frame} fps={fps} />
+    ) : (
+      <DotLottiePreview data={conversion.dot!} frame={playback.frame} fps={fps} />
+    );
 
   return (
     <div
-      className={`app ${dragging ? 'is-dragging' : ''}`}
-      onDragOver={(e) => {
+      className="app"
+      onDragEnter={(e) => {
         e.preventDefault();
+        dragDepth.current++;
         setDragging(true);
       }}
-      onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false);
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
       }}
       onDrop={onDrop}
     >
       <header className="topbar">
-        <div className="brand">
+        <button className="brand" onClick={() => setLoaded(null)} title="Back to start">
           <span className="logo" aria-hidden />
-          <div>
-            <h1>svg2lottie</h1>
-            <p>Animated SVG (Figma Motion, CSS keyframes, SMIL) → Lottie &amp; dotLottie</p>
-          </div>
-        </div>
+          <span className="brand-text">
+            <strong>svg2lottie</strong>
+            <span>Animated SVG → Lottie &amp; dotLottie</span>
+          </span>
+        </button>
         <div className="topbar-actions">
-          <select
-            aria-label="Load an example"
-            value=""
-            onChange={(e) => {
-              const ex = EXAMPLES.find((x) => x.name === e.target.value);
-              if (ex) setLoaded({ name: ex.name, svg: ex.svg });
-            }}
-          >
-            <option value="" disabled>
-              Examples…
-            </option>
-            {EXAMPLES.map((ex) => (
-              <option key={ex.name} value={ex.name}>
-                {ex.name}
+          {loaded && (
+            <select
+              aria-label="Load an example"
+              value=""
+              onChange={(e) => {
+                const ex = EXAMPLES.find((x) => x.name === e.target.value);
+                if (ex) setLoaded({ name: ex.name, svg: ex.svg });
+              }}
+            >
+              <option value="" disabled>
+                Examples
               </option>
-            ))}
-          </select>
-          <button className="btn" onClick={() => fileInput.current?.click()}>
-            Open SVG
+              {EXAMPLES.map((ex) => (
+                <option key={ex.name} value={ex.name}>
+                  {ex.title}
+                </option>
+              ))}
+            </select>
+          )}
+          <button className="btn primary-soft" onClick={() => fileInput.current?.click()}>
+            <UploadIcon /> <span className="btn-label">{loaded ? 'Open another' : 'Open SVG'}</span>
           </button>
-          <input ref={fileInput} type="file" accept=".svg,image/svg+xml" hidden onChange={(e) => void openFile(e.target.files?.[0])} />
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".svg,image/svg+xml"
+            hidden
+            onChange={(e) => {
+              void openFile(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
         </div>
       </header>
 
-      {!loaded && (
-        <main className="empty">
-          <button className="dropzone" onClick={() => fileInput.current?.click()}>
-            <span className="dropzone-icon" aria-hidden>
-              <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M24 32V10M15 19l9-9 9 9" />
-                <path d="M8 30v6a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-6" />
-              </svg>
-            </span>
-            <strong>Drop an animated SVG here</strong>
-            <span>or click to browse. Everything runs locally in your browser.</span>
-          </button>
-          <button className="link" onClick={() => setLoaded({ name: EXAMPLES[0].name, svg: EXAMPLES[0].svg })}>
-            Try the Figma Motion sample →
-          </button>
-          {loadError && <p className="error">{loadError}</p>}
-        </main>
-      )}
+      {!loaded && <Landing onBrowse={() => fileInput.current?.click()} onPick={(ex) => setLoaded(ex)} />}
 
       {loaded && (
         <main className="workspace">
           <section className="toolbar">
             <div className="file">
-              <span className="file-name">{loaded.name}.svg</span>
-              {result && (
-                <span className="file-meta">
-                  {result.stats.width}×{result.stats.height} · {result.stats.durationSeconds.toFixed(2)}s · {result.stats.layers} layers · {result.stats.keyframes} keyframes
+              <span className="file-icon" aria-hidden>
+                SVG
+              </span>
+              <div>
+                <span className="file-name" title={`${loaded.name}.svg`}>
+                  {loaded.name}.svg
                 </span>
-              )}
+                {result && (
+                  <span className="chips">
+                    <Chip>{result.stats.width}×{result.stats.height}</Chip>
+                    <Chip>{result.stats.durationSeconds.toFixed(2)}s</Chip>
+                    <Chip>{result.stats.layers} layers</Chip>
+                    <Chip>{result.stats.animatedProperties} animated props</Chip>
+                    {conversion.ms !== undefined && <Chip muted>converted in {conversion.ms.toFixed(0)} ms</Chip>}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="controls">
               <Segmented
+                label="View"
+                value={view}
+                onChange={setView}
+                options={[
+                  ['side', 'Side by side'],
+                  ['swipe', 'Swipe'],
+                ]}
+              />
+              <Segmented
                 label="Lottie player"
-                value={mode}
-                onChange={setMode}
+                value={effectivePlayer}
+                onChange={setPlayer}
                 options={[
                   ['lottie-web', 'lottie-web'],
                   ['dotlottie', 'dotLottie'],
-                  ['both', 'Both'],
+                  ...(view === 'side' ? ([['both', 'Both']] as [PlayerMode, string][]) : []),
                 ]}
               />
               <Segmented
@@ -176,159 +234,229 @@ export function App() {
                 value={backdrop}
                 onChange={setBackdrop}
                 options={[
-                  ['checker', 'Checker'],
-                  ['dark', 'Dark'],
-                  ['light', 'Light'],
+                  ['checker', <CheckerIcon key="c" />],
+                  ['dark', <span key="d" className="swatch dark" />],
+                  ['light', <span key="l" className="swatch light" />],
                 ]}
+                titles={{ checker: 'Checkerboard', dark: 'Dark', light: 'Light' }}
               />
-              <label className="field">
-                FPS
-                <select value={fps} onChange={(e) => setFps(Number(e.target.value))}>
-                  {[24, 25, 30, 50, 60].map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field checkbox">
-                <input type="checkbox" checked={blur} onChange={(e) => setBlur(e.target.checked)} />
-                Blur effects
-              </label>
             </div>
           </section>
 
           {conversion.error && (
-            <div className="error-card">
-              <strong>Conversion failed</strong>
+            <div className="error-card" role="alert">
+              <strong>This file could not be converted</strong>
               <p>{conversion.error}</p>
+              <button className="btn" onClick={() => fileInput.current?.click()}>
+                Try another file
+              </button>
             </div>
           )}
 
           {result && conversion.dot && (
             <>
-              <section className={`stages cols-${mode === 'both' ? 3 : 2}`}>
-                <Stage title="Original SVG" subtitle="browser" backdrop={backdrop} aspect={aspect}>
-                  <SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} />
-                </Stage>
-                {mode !== 'dotlottie' && (
-                  <Stage title="Lottie" subtitle="lottie-web" backdrop={backdrop} aspect={aspect}>
-                    <LottieWebPreview animation={result.animation} frame={playback.frame} fps={fps} />
+              {view === 'side' ? (
+                <section className={`stages cols-${effectivePlayer === 'both' ? 3 : 2}`}>
+                  <Stage title="Original" subtitle="SVG in the browser" backdrop={backdrop} ratio={ratio}>
+                    <SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} />
                   </Stage>
-                )}
-                {mode !== 'lottie-web' && (
-                  <Stage title="dotLottie" subtitle="ThorVG player" backdrop={backdrop} aspect={aspect}>
-                    <DotLottiePreview data={conversion.dot} frame={playback.frame} fps={fps} />
-                  </Stage>
-                )}
-              </section>
-
-              <section className="transport">
-                <button className="btn icon" aria-label={playback.playing ? 'Pause' : 'Play'} onClick={() => playback.setPlaying(!playback.playing)}>
-                  {playback.playing ? (
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M7 5v14l12-7z" /></svg>
+                  {effectivePlayer !== 'dotlottie' && (
+                    <Stage title="Lottie" subtitle="lottie-web · SVG renderer" backdrop={backdrop} ratio={ratio} accent>
+                      {lottieView('lottie-web')}
+                    </Stage>
                   )}
-                </button>
-                <input
-                  className="scrubber"
-                  type="range"
-                  min={0}
-                  max={Math.max(0, totalFrames - 1)}
-                  step={1}
-                  value={frameInt}
-                  aria-label="Scrub"
-                  onChange={(e) => {
-                    playback.setPlaying(false);
-                    playback.seek(Number(e.target.value));
-                  }}
-                />
-                <span className="timecode">
-                  {(playback.frame / fps).toFixed(2)}s · frame {frameInt}/{totalFrames}
-                </span>
-                <label className="field checkbox">
-                  <input type="checkbox" checked={playback.loop} onChange={(e) => playback.setLoop(e.target.checked)} />
-                  Loop
-                </label>
-              </section>
+                  {effectivePlayer !== 'lottie-web' && (
+                    <Stage title="dotLottie" subtitle="ThorVG player · .lottie" backdrop={backdrop} ratio={ratio} accent>
+                      {lottieView('dotlottie')}
+                    </Stage>
+                  )}
+                </section>
+              ) : (
+                <section className="stages cols-1">
+                  <Stage title="Swipe compare" subtitle={`Original ◀ ▶ ${effectivePlayer === 'dotlottie' ? 'dotLottie' : 'lottie-web'}`} backdrop={backdrop} ratio={ratio} large>
+                    <SwipeCompare
+                      left={<SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} />}
+                      right={lottieView(effectivePlayer === 'dotlottie' ? 'dotlottie' : 'lottie-web')}
+                      rightLabel={effectivePlayer === 'dotlottie' ? 'dotLottie' : 'lottie-web'}
+                    />
+                  </Stage>
+                </section>
+              )}
+
+              <Transport playback={playback} totalFrames={totalFrames} fps={fps} />
 
               <section className="bottom">
-                <div className="card downloads">
+                <div className="card export">
                   <h2>Export</h2>
-                  <button className="btn primary" onClick={() => download(conversion.json!, 'application/json', `${loaded.name}.json`)}>
-                    Download .json <small>{formatBytes(conversion.json!.length)}</small>
+                  <div className="export-grid">
+                    <button className="export-btn" onClick={() => download(conversion.json!, 'application/json', `${loaded.name}.json`)}>
+                      <span className="ext">.json</span>
+                      <span className="export-meta">
+                        <strong>Lottie JSON</strong>
+                        <small>{formatBytes(conversion.json!.length)} · lottie-web, lottie-react</small>
+                      </span>
+                      <DownloadIcon />
+                    </button>
+                    <button className="export-btn" onClick={() => download(conversion.dot!.slice().buffer, 'application/zip', `${loaded.name}.lottie`)}>
+                      <span className="ext alt">.lottie</span>
+                      <span className="export-meta">
+                        <strong>dotLottie</strong>
+                        <small>{formatBytes(conversion.dot!.length)} · compressed, dotLottie players</small>
+                      </span>
+                      <DownloadIcon />
+                    </button>
+                  </div>
+                  <button
+                    className="btn ghost full"
+                    onClick={() =>
+                      navigator.clipboard
+                        ?.writeText(conversion.json!)
+                        .then(() => notify('Lottie JSON copied to clipboard'))
+                        .catch(() => notify('Clipboard is not available here', 'err'))
+                    }
+                  >
+                    <CopyIcon /> Copy JSON
                   </button>
-                  <button className="btn primary" onClick={() => download(conversion.dot!.slice().buffer, 'application/zip', `${loaded.name}.lottie`)}>
-                    Download .lottie <small>{formatBytes(conversion.dot!.length)}</small>
-                  </button>
-                  <button className="btn" onClick={() => void navigator.clipboard?.writeText(conversion.json!)}>
-                    Copy JSON
-                  </button>
-                  <p className="hint">
-                    Source SVG {formatBytes(loaded.svg.length)} · {result.stats.animatedProperties} animated properties · {fps} fps
-                  </p>
+                  <div className="settings">
+                    <label className="field">
+                      <span>Frame rate</span>
+                      <select value={fps} onChange={(e) => setFps(Number(e.target.value))}>
+                        {[24, 25, 30, 50, 60].map((f) => (
+                          <option key={f} value={f}>
+                            {f} fps
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="toggle">
+                      <input type="checkbox" checked={blur} onChange={(e) => setBlur(e.target.checked)} />
+                      <span className="toggle-track" aria-hidden />
+                      <span>Blur effects</span>
+                    </label>
+                  </div>
+                  <dl className="stats">
+                    <div>
+                      <dt>Source</dt>
+                      <dd>{formatBytes(loaded.svg.length)}</dd>
+                    </div>
+                    <div>
+                      <dt>Frames</dt>
+                      <dd>{result.stats.frames}</dd>
+                    </div>
+                    <div>
+                      <dt>Keyframes</dt>
+                      <dd>{result.stats.keyframes}</dd>
+                    </div>
+                  </dl>
                 </div>
-                <Warnings warnings={result.warnings} />
+                <Report warnings={result.warnings} />
               </section>
             </>
           )}
         </main>
       )}
-      {dragging && <div className="drop-overlay">Drop to convert</div>}
+
+      {dragging && (
+        <div className="drop-overlay">
+          <div>
+            <UploadIcon size={40} />
+            <strong>Drop to convert</strong>
+            <span>SVG files only · nothing leaves your machine</span>
+          </div>
+        </div>
+      )}
+      {toast && (
+        <div className={`toast ${toast.tone}`} role="status">
+          {toast.text}
+        </div>
+      )}
     </div>
   );
 }
 
-function Stage({ title, subtitle, backdrop, aspect, children }: { title: string; subtitle: string; backdrop: Backdrop; aspect: string; children: React.ReactNode }) {
+function Chip({ children, muted }: { children: ReactNode; muted?: boolean }) {
+  return <span className={`chip ${muted ? 'muted' : ''}`}>{children}</span>;
+}
+
+function Stage({
+  title,
+  subtitle,
+  backdrop,
+  ratio,
+  accent,
+  large,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  backdrop: Backdrop;
+  ratio: number;
+  accent?: boolean;
+  large?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <figure className="stage">
+    <figure className={`stage ${accent ? 'accent' : ''}`}>
       <figcaption>
         <strong>{title}</strong>
         <span>{subtitle}</span>
       </figcaption>
-      <div className={`stage-box backdrop-${backdrop}`} style={{ aspectRatio: aspect }}>
-        {children}
+      <div className={`stage-body backdrop-${backdrop}`}>
+        <div className="stage-box" style={{ aspectRatio: String(ratio), width: `min(100%, calc(var(${large ? '--stage-max-h-large' : '--stage-max-h'}) * ${ratio}))` }}>
+          {children}
+        </div>
       </div>
     </figure>
   );
 }
 
-function Segmented<T extends string>({ label, value, onChange, options }: { label: string; value: T; onChange: (v: T) => void; options: [T, string][] }) {
+export function Segmented<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+  titles,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: [T, ReactNode][];
+  titles?: Partial<Record<T, string>>;
+}) {
   return (
     <div className="segmented" role="radiogroup" aria-label={label}>
-      {options.map(([v, text]) => (
-        <button key={v} role="radio" aria-checked={value === v} className={value === v ? 'active' : ''} onClick={() => onChange(v)}>
-          {text}
+      {options.map(([v, content]) => (
+        <button
+          key={v}
+          role="radio"
+          aria-checked={value === v}
+          aria-label={titles?.[v]}
+          title={titles?.[v]}
+          className={value === v ? 'active' : ''}
+          onClick={() => onChange(v)}
+        >
+          {content}
         </button>
       ))}
     </div>
   );
 }
 
-function Warnings({ warnings }: { warnings: ConversionWarning[] }) {
-  const issues = warnings.filter((w) => w.severity !== 'info');
-  const notes = warnings.filter((w) => w.severity === 'info');
-  return (
-    <div className="card warnings">
-      <h2>
-        Conversion report
-        <span className={`badge ${issues.length ? 'warn' : 'ok'}`}>{issues.length ? `${issues.length} warning${issues.length > 1 ? 's' : ''}` : 'No issues'}</span>
-      </h2>
-      {!warnings.length && <p className="hint">Everything in this file maps to standard Lottie features.</p>}
-      <ul>
-        {[...issues, ...notes].map((w, k) => (
-          <li key={k} className={`sev-${w.severity}`}>
-            <span className="dot" aria-hidden />
-            <div>
-              <p>{w.message}</p>
-              <small>
-                {w.element && <code>{w.element}</code>} {w.code}
-              </small>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+const DownloadIcon = () => (
+  <svg className="dl-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 4v11M7 10l5 5 5-5" />
+    <path d="M4 20h16" />
+  </svg>
+);
+const CopyIcon = () => (
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+  </svg>
+);
+const CheckerIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+    <rect width="16" height="16" rx="3" fill="#2d2a3b" />
+    <path d="M0 0h8v8H0zM8 8h8v8H8z" fill="#8c88a3" />
+  </svg>
+);

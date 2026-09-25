@@ -6,7 +6,7 @@
   </defs>
   <rect width="120" height="120" fill="#eee"/>
   <text x="10" y="20">Hello</text>
-  <image href="data:image/png;base64,iVBORw0KGgo=" width="10" height="10"/>
+  <image href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkaPhfDwAEwQHwZ1LNVQAAAABJRU5ErkJggg==" width="10" height="10"/>
   <rect x="10" y="30" width="40" height="40" fill="#333" mask="url(#m)"/>
   <rect x="60" y="30" width="40" height="40" fill="url(#p)"/>
   <circle cx="30" cy="95" r="12" fill="#09f" filter="url(#shadow)"/>
