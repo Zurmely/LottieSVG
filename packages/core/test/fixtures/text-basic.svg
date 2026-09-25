@@ -1,0 +1,12 @@
+<svg width="480" height="320" viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg">
+  <rect width="480" height="320" fill="#101322"/>
+  <text x="24" y="56" font-family="Roboto" font-size="40" fill="#f5f5f5">AVATAR To office</text>
+  <text x="240" y="110" font-family="Roboto, sans-serif" font-size="28" font-weight="700" text-anchor="middle" fill="#ffd166">Centered bold</text>
+  <text x="456" y="150" font-family="'Roboto'" font-size="22" font-style="italic" text-anchor="end" fill="#06d6a0">Right aligned italic</text>
+  <text x="24" y="196" font-family="Roboto" font-size="24" letter-spacing="3" word-spacing="6" fill="#8ecae6" stroke="#023047" stroke-width="0.8">Spaced  out
+    text</text>
+  <text x="24" y="246" font-family="Roboto" font-size="24" fill="white">Mixed <tspan fill="#ef476f" font-weight="bold">bold</tspan> and <tspan dy="-8" font-size="16" fill="#ffd166">raised</tspan><tspan dy="8"> back</tspan></text>
+  <text x="330 352 374 396" y="246" font-family="Roboto" font-size="24" fill="#bde0fe" rotate="0 15 30 45">ABCD</text>
+  <line x1="24" x2="456" y1="292" y2="292" stroke="#ffffff33"/>
+  <text y="292" font-family="Roboto" font-size="18" fill="#caffbf"><tspan x="24" dominant-baseline="middle">middle</tspan><tspan x="112" dominant-baseline="central">central</tspan><tspan x="204" dominant-baseline="hanging">hanging</tspan><tspan x="300" dominant-baseline="text-before-edge">edge</tspan><tspan x="352" dominant-baseline="ideographic">ideo</tspan><tspan x="420" dx="4 4" dy="-2 4">dxy</tspan></text>
+</svg>

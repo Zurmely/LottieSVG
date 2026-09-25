@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <link rel="stylesheet" href="/fonts.css" />
     <style>
       body { margin: 0; background: #fff; display: flex; gap: 8px; padding: 8px; }
       .cell { position: relative; overflow: hidden; background: #fff; }
@@ -27,6 +28,8 @@
       const svgEl = host.querySelector('svg');
       svgEl.setAttribute('width', W);
       svgEl.setAttribute('height', H);
+      await Promise.all([...document.fonts].map((f) => f.load().catch(() => null)));
+      await document.fonts.ready;
 
       const animationData = await (await fetch('/anim.json')).json();
       const lw = lottie.loadAnimation({

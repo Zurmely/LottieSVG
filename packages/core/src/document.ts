@@ -51,6 +51,8 @@ export interface SvgNode extends MatchableElement {
   parent: SvgNode | null;
   children: SvgNode[];
   text: string;
+  /** text and element children in document order (needed for text layout) */
+  content: (string | SvgNode)[];
   props: Map<string, PropState>;
   label: string;
 }
@@ -58,7 +60,9 @@ export interface SvgNode extends MatchableElement {
 const INHERITED = new Set([
   'fill', 'fill-opacity', 'fill-rule', 'stroke', 'stroke-opacity', 'stroke-width', 'stroke-linecap',
   'stroke-linejoin', 'stroke-miterlimit', 'stroke-dasharray', 'stroke-dashoffset', 'color', 'visibility',
-  'paint-order', 'clip-rule',
+  'paint-order', 'clip-rule', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch',
+  'font-variant', 'font-kerning', 'font-feature-settings', 'letter-spacing', 'word-spacing', 'text-anchor',
+  'dominant-baseline', 'white-space', 'direction', 'writing-mode', 'xml:space', 'text-rendering',
 ]);
 
 const SMIL_TAGS = new Set(['animate', 'animateTransform', 'animateColor', 'set', 'animateMotion']);
@@ -80,14 +84,21 @@ function makeNode(el: Element, parent: SvgNode | null): SvgNode {
     parent,
     children: [],
     text: '',
+    content: [],
     props: new Map(),
     label: id ? `${tagName}#${id}` : tagName,
     getAttribute: (name: string) => attrs.get(name) ?? null,
   };
   for (let k = 0; k < el.childNodes.length; k++) {
     const c = el.childNodes[k];
-    if (c.nodeType === 1) node.children.push(makeNode(c as Element, node));
-    else if (c.nodeType === 3 || c.nodeType === 4) node.text += c.nodeValue ?? '';
+    if (c.nodeType === 1) {
+      const child = makeNode(c as Element, node);
+      node.children.push(child);
+      node.content.push(child);
+    } else if (c.nodeType === 3 || c.nodeType === 4) {
+      node.text += c.nodeValue ?? '';
+      node.content.push(c.nodeValue ?? '');
+    }
   }
   return node;
 }
@@ -158,7 +169,11 @@ function computeStyle(n: SvgNode, sheet: Stylesheet, all: PropAnimation[], warni
   for (const { decl } of matched) {
     const prop = PROPERTY_ALIASES[decl.property] ?? decl.property;
     if (prop.startsWith('animation')) animationDecls.set(prop, decl.value);
-    else declared.set(prop, { value: decl.value, origin: 'css' });
+    else if (prop === 'font') {
+      const longhands = expandFontShorthand(decl.value);
+      if (longhands) for (const [k, v] of Object.entries(longhands)) declared.set(k, { value: v, origin: 'css' });
+      else warnings.add('css-font', `Could not parse font shorthand "${decl.value}"`, n.label);
+    } else declared.set(prop, { value: decl.value, origin: 'css' });
   }
 
   for (const [prop, { value, origin }] of declared) {
@@ -364,4 +379,28 @@ function collectSmil(n: SvgNode, byId: Map<string, SvgNode>, all: PropAnimation[
   all.push(anim);
   addAnimation(target, anim.property, anim);
   propagate(target, anim.property);
+}
+
+const FONT_SIZE_RE = /^([\d.]+(px|em|rem|%|pt|pc|ex|ch|vw|vh|mm|cm|in)?|xx-small|x-small|small|medium|large|x-large|xx-large|xxx-large|smaller|larger)(\/.+)?$/i;
+
+/** Expand the CSS `font` shorthand into longhands (style, variant, weight, stretch, size, family). */
+export function expandFontShorthand(value: string): Record<string, string> | null {
+  const tokens = value.trim().split(/\s+/);
+  const out: Record<string, string> = { 'font-style': 'normal', 'font-variant': 'normal', 'font-weight': 'normal', 'font-stretch': 'normal' };
+  let i = 0;
+  for (; i < tokens.length; i++) {
+    const t = tokens[i].toLowerCase();
+    if (FONT_SIZE_RE.test(t) && !/^\d{3}$/.test(t) && i < tokens.length - 1) break;
+    if (t === 'italic' || t === 'oblique') out['font-style'] = t;
+    else if (t === 'small-caps') out['font-variant'] = t;
+    else if (/^(bold|bolder|lighter|\d{3})$/.test(t)) out['font-weight'] = t;
+    else if (/condensed|expanded/.test(t)) out['font-stretch'] = t;
+    else if (t !== 'normal') return null;
+  }
+  const m = FONT_SIZE_RE.exec(tokens[i] ?? '');
+  const family = tokens.slice(i + 1).join(' ');
+  if (!m || !family) return null;
+  out['font-size'] = m[1];
+  out['font-family'] = family;
+  return out;
 }

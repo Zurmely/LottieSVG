@@ -7,6 +7,9 @@
     "paths": {
       "@svg2lottie/core": [
         "../core/src/index.ts"
+      ],
+      "@svg2lottie/core/node": [
+        "../core/src/node.ts"
       ]
     }
   },
