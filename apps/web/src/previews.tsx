@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import lottie, { type AnimationItem } from 'lottie-web';
 import { DotLottie } from '@lottiefiles/dotlottie-web';
 import wasmUrl from '@lottiefiles/dotlottie-web/dotlottie-player.wasm?url';
+import { applyAccessibleLabel } from '@svg2lottie/a11y';
 import type { LottieAnimation } from '@svg2lottie/core';
 
 DotLottie.setWasmUrl(wasmUrl);
@@ -15,9 +16,9 @@ interface PreviewProps {
  * Renders the source SVG in a sandboxed iframe (scripts disabled) and drives its CSS and SMIL
  * animations from the shared clock.
  */
-export function SvgPreview({ svg, frame, fps }: PreviewProps & { svg: string }) {
+export function SvgPreview({ svg, frame, fps, fontCss = '' }: PreviewProps & { svg: string; fontCss?: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const srcDoc = `<!doctype html><html><head><style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}
+  const srcDoc = `<!doctype html><html><head><style>${fontCss}</style><style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}
     body{display:grid;place-items:center}body>svg{width:100%;height:100%;display:block}</style></head><body>${svg}</body></html>`;
 
   useEffect(() => {
@@ -53,6 +54,7 @@ export function LottieWebPreview({ animation, frame }: PreviewProps & { animatio
       rendererSettings: { preserveAspectRatio: 'xMidYMid meet' },
     });
     anim.current = item;
+    applyAccessibleLabel(container.current, animation);
     return () => {
       item.destroy();
       anim.current = null;
@@ -68,6 +70,7 @@ export function LottieWebPreview({ animation, frame }: PreviewProps & { animatio
 
 export function DotLottiePreview({ data, frame }: PreviewProps & { data: Uint8Array }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const wrapper = useRef<HTMLDivElement>(null);
   const player = useRef<DotLottie | null>(null);
   const ready = useRef(false);
   const frameRef = useRef(frame);
@@ -87,6 +90,7 @@ export function DotLottiePreview({ data, frame }: PreviewProps & { data: Uint8Ar
     });
     p.addEventListener('load', () => {
       ready.current = true;
+      if (wrapper.current) applyAccessibleLabel(wrapper.current, p);
       p.setFrame(frameRef.current);
     });
     player.current = p;
@@ -100,5 +104,9 @@ export function DotLottiePreview({ data, frame }: PreviewProps & { data: Uint8Ar
     if (ready.current) player.current?.setFrame(frame);
   }, [frame]);
 
-  return <canvas ref={canvas} className="stage-surface" />;
+  return (
+    <div ref={wrapper} className="stage-surface">
+      <canvas ref={canvas} className="stage-surface" />
+    </div>
+  );
 }

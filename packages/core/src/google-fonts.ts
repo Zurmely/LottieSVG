@@ -62,7 +62,27 @@ async function cached(key: string, cache: FontCache | undefined, load: () => Pro
  * Download one family/weight/style from Google Fonts into the library. Returns false when Google does not
  * serve that family (the caller then tries the next family in the font-family list).
  */
-export async function loadGoogleFont(library: FontLibrary, family: string, weight: number, style: FontStyle, options: GoogleFontsOptions): Promise<boolean> {
+/** Does a CSS unicode-range (e.g. `U+0000-00FF, U+0131`) cover any of the characters? */
+export function rangeCovers(range: string | undefined, text: string | undefined): boolean {
+  if (!range || !text) return true;
+  const spans = range.split(',').map((r) => {
+    const m = /U\+([0-9a-f?]+)(?:-([0-9a-f]+))?/i.exec(r.trim());
+    if (!m) return [0, 0x10ffff];
+    if (m[1].includes('?')) return [parseInt(m[1].replace(/\?/g, '0'), 16), parseInt(m[1].replace(/\?/g, 'f'), 16)];
+    const a = parseInt(m[1], 16);
+    return [a, m[2] ? parseInt(m[2], 16) : a];
+  });
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (spans.some(([a, b]) => cp >= a && cp <= b)) return true;
+  }
+  return false;
+}
+
+/**
+ * `text` limits unicode-range subsets (browsers receive WOFF2 split by script) to the ones actually needed.
+ */
+export async function loadGoogleFont(library: FontLibrary, family: string, weight: number, style: FontStyle, options: GoogleFontsOptions, text?: string): Promise<boolean> {
   const url = googleFontsCssUrl(family, weight, style, options.cssBase);
   let css: string;
   try {
@@ -79,8 +99,10 @@ export async function loadGoogleFont(library: FontLibrary, family: string, weigh
       return false;
     }
   }
-  const faces = parseGoogleFontsCss(css);
-  if (!faces.length) return false;
+  const all = parseGoogleFontsCss(css);
+  if (!all.length) return false;
+  const needed = all.filter((f) => rangeCovers(f.unicodeRange, text));
+  const faces = needed.length ? needed : all;
   for (const face of faces) {
     const data = await cached(face.url, options.cache, () => options.fetcher.fetchBinary(face.url));
     // Register under the requested name; static instances from the CSS API carry their weight in the CSS.

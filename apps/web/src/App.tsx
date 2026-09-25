@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { convertSvg, toDotLottie, type ConversionResult } from '@svg2lottie/core';
+import { FontLibrary, convertSvg, resolveFonts, toDotLottie, withAccessibleLabel, type ConversionResult, type FontResolution, type LottieAnimation } from '@svg2lottie/core';
+import { AccessibilityPanel } from './AccessibilityPanel';
+import { browserFetcher, browserFontCache, FONT_FILE_RE, fontFaceCss } from './browserFonts';
+import { FontsPanel } from './FontsPanel';
 import { UploadIcon } from './icons';
 import { Landing, EXAMPLES } from './Landing';
 import { DotLottiePreview, LottieWebPreview, SvgPreview } from './previews';
@@ -43,26 +46,84 @@ export function App() {
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
+  const library = useRef(new FontLibrary()).current;
+  const fontCache = useRef(browserFontCache()).current;
+  const [fontsVersion, setFontsVersion] = useState(0);
+  const [google, setGoogle] = useState(true);
+  const [fontStatus, setFontStatus] = useState<FontResolution[]>([]);
+  const [fontsLoading, setFontsLoading] = useState(false);
+  const [uploadedFonts, setUploadedFonts] = useState<string[]>([]);
+  const [a11yLabel, setA11yLabel] = useState('');
+  const [includeA11y, setIncludeA11y] = useState(true);
 
   const notify = useCallback((text: string, tone: 'ok' | 'err' = 'ok') => {
     setToast({ text, tone });
     window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), 2600);
   }, []);
 
-  const conversion = useMemo((): { result?: ConversionResult; json?: string; dot?: Uint8Array; error?: string; ms?: number } => {
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    setFontsLoading(true);
+    resolveFonts(loaded.svg, library, { google: google ? { fetcher: browserFetcher, cache: fontCache } : false })
+      .then((status) => {
+        if (cancelled) return;
+        setFontStatus(status);
+        setFontsVersion((v) => v + 1);
+      })
+      .catch(() => !cancelled && setFontStatus([]))
+      .finally(() => !cancelled && setFontsLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [loaded, google, uploadedFonts, library, fontCache]);
+
+  const conversion = useMemo((): { result?: ConversionResult; error?: string; ms?: number } => {
     if (!loaded) return {};
     const started = performance.now();
     try {
-      const result = convertSvg(loaded.svg, { fps, blur, name: loaded.name });
-      const json = JSON.stringify(result.animation);
-      const dot = toDotLottie(result.animation, { id: loaded.name });
-      return { result, json, dot, ms: performance.now() - started };
+      const result = convertSvg(loaded.svg, { fps, blur, name: loaded.name, fonts: library });
+      return { result, ms: performance.now() - started };
     } catch (e) {
       return { error: (e as Error).message };
     }
-  }, [loaded, fps, blur]);
+    // fontsVersion: the library is mutable; re-run when fonts were added.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, fps, blur, library, fontsVersion]);
 
   const { result } = conversion;
+  const extractedLabel = result?.accessibility.label ?? '';
+  useEffect(() => setA11yLabel(extractedLabel), [extractedLabel, loaded]);
+
+  const exported = useMemo((): { animation: LottieAnimation; json: string; dot: Uint8Array } | null => {
+    if (!result || !loaded) return null;
+    let animation = withAccessibleLabel(result.animation, a11yLabel);
+    if (!includeA11y) {
+      const { d: _d, a11y: _a, ...meta } = animation.meta ?? {};
+      animation = { ...animation, meta };
+    }
+    return { animation, json: JSON.stringify(animation), dot: toDotLottie(animation, { id: loaded.name }) };
+  }, [result, loaded, a11yLabel, includeA11y]);
+  const fontCss = useMemo(() => fontFaceCss(library.faces), [library, fontsVersion]);
+
+  const addFonts = useCallback(
+    async (files: File[]) => {
+      const names: string[] = [];
+      for (const f of files) {
+        try {
+          library.add(new Uint8Array(await f.arrayBuffer()), { source: `upload: ${f.name}` });
+          names.push(f.name);
+        } catch (e) {
+          notify((e as Error).message, 'err');
+        }
+      }
+      if (names.length) {
+        setUploadedFonts((u) => [...u, ...names]);
+        notify(`Added ${names.length} font${names.length > 1 ? 's' : ''}`);
+      }
+    },
+    [library, notify],
+  );
   const totalFrames = result?.stats.frames ?? 1;
   const playback = usePlayback(totalFrames, fps);
 
@@ -113,7 +174,11 @@ export function App() {
     e.preventDefault();
     dragDepth.current = 0;
     setDragging(false);
-    void openFile(e.dataTransfer.files[0]);
+    const files = [...e.dataTransfer.files];
+    const fonts = files.filter((f) => FONT_FILE_RE.test(f.name));
+    if (fonts.length) void addFonts(fonts);
+    const svg = files.find((f) => !FONT_FILE_RE.test(f.name));
+    if (svg) void openFile(svg);
   };
 
   const ratio = result ? result.stats.width / result.stats.height : 1;
@@ -121,9 +186,9 @@ export function App() {
 
   const lottieView = (which: 'lottie-web' | 'dotlottie') =>
     which === 'lottie-web' ? (
-      <LottieWebPreview animation={result!.animation} frame={playback.frame} fps={fps} />
+      <LottieWebPreview animation={exported!.animation} frame={playback.frame} fps={fps} />
     ) : (
-      <DotLottiePreview data={conversion.dot!} frame={playback.frame} fps={fps} />
+      <DotLottiePreview data={exported!.dot} frame={playback.frame} fps={fps} />
     );
 
   return (
@@ -253,12 +318,12 @@ export function App() {
             </div>
           )}
 
-          {result && conversion.dot && (
+          {result && exported && (
             <>
               {view === 'side' ? (
                 <section className={`stages cols-${effectivePlayer === 'both' ? 3 : 2}`}>
                   <Stage title="Original" subtitle="SVG in the browser" backdrop={backdrop} ratio={ratio}>
-                    <SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} />
+                    <SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} fontCss={fontCss} />
                   </Stage>
                   {effectivePlayer !== 'dotlottie' && (
                     <Stage title="Lottie" subtitle="lottie-web · SVG renderer" backdrop={backdrop} ratio={ratio} accent>
@@ -275,7 +340,7 @@ export function App() {
                 <section className="stages cols-1">
                   <Stage title="Swipe compare" subtitle={`Original ◀ ▶ ${effectivePlayer === 'dotlottie' ? 'dotLottie' : 'lottie-web'}`} backdrop={backdrop} ratio={ratio} large>
                     <SwipeCompare
-                      left={<SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} />}
+                      left={<SvgPreview svg={loaded.svg} frame={playback.frame} fps={fps} fontCss={fontCss} />}
                       right={lottieView(effectivePlayer === 'dotlottie' ? 'dotlottie' : 'lottie-web')}
                       rightLabel={effectivePlayer === 'dotlottie' ? 'dotLottie' : 'lottie-web'}
                     />
@@ -286,22 +351,23 @@ export function App() {
               <Transport playback={playback} totalFrames={totalFrames} fps={fps} />
 
               <section className="bottom">
+                <div className="side">
                 <div className="card export">
                   <h2>Export</h2>
                   <div className="export-grid">
-                    <button className="export-btn" onClick={() => download(conversion.json!, 'application/json', `${loaded.name}.json`)}>
+                    <button className="export-btn" onClick={() => download(exported.json, 'application/json', `${loaded.name}.json`)}>
                       <span className="ext">.json</span>
                       <span className="export-meta">
                         <strong>Lottie JSON</strong>
-                        <small>{formatBytes(conversion.json!.length)} · lottie-web, lottie-react</small>
+                        <small>{formatBytes(exported.json.length)} · lottie-web, lottie-react</small>
                       </span>
                       <DownloadIcon />
                     </button>
-                    <button className="export-btn" onClick={() => download(conversion.dot!.slice().buffer, 'application/zip', `${loaded.name}.lottie`)}>
+                    <button className="export-btn" onClick={() => download(exported.dot.slice().buffer, 'application/zip', `${loaded.name}.lottie`)}>
                       <span className="ext alt">.lottie</span>
                       <span className="export-meta">
                         <strong>dotLottie</strong>
-                        <small>{formatBytes(conversion.dot!.length)} · compressed, dotLottie players</small>
+                        <small>{formatBytes(exported.dot.length)} · compressed, dotLottie players</small>
                       </span>
                       <DownloadIcon />
                     </button>
@@ -310,7 +376,7 @@ export function App() {
                     className="btn ghost full"
                     onClick={() =>
                       navigator.clipboard
-                        ?.writeText(conversion.json!)
+                        ?.writeText(exported.json)
                         .then(() => notify('Lottie JSON copied to clipboard'))
                         .catch(() => notify('Clipboard is not available here', 'err'))
                     }
@@ -349,7 +415,24 @@ export function App() {
                     </div>
                   </dl>
                 </div>
-                <Report warnings={result.warnings} />
+                <FontsPanel status={fontStatus} loading={fontsLoading} google={google} onGoogle={setGoogle} onUpload={(f) => void addFonts(f)} uploaded={uploadedFonts} />
+                </div>
+                <div className="side">
+                  <AccessibilityPanel
+                    info={result.accessibility}
+                    label={a11yLabel}
+                    onLabel={setA11yLabel}
+                    include={includeA11y}
+                    onInclude={setIncludeA11y}
+                    onCopy={(text, what) =>
+                      navigator.clipboard
+                        ?.writeText(text)
+                        .then(() => notify(`${what} copied to clipboard`))
+                        .catch(() => notify('Clipboard is not available here', 'err'))
+                    }
+                  />
+                  <Report warnings={result.warnings} />
+                </div>
               </section>
             </>
           )}

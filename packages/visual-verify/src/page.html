@@ -60,8 +60,8 @@
       await new Promise((r) => (lw.isLoaded ? r() : lw.addEventListener('DOMLoaded', r)));
 
       const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      window.seek = async (frame, fps) => {
-        const t = frame / fps;
+      window.seek = async (frame, fps, svgOffset = 0) => {
+        const t = (frame + svgOffset) / fps;
         for (const a of document.getAnimations()) {
           a.pause();
           a.currentTime = t * 1000;

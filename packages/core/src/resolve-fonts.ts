@@ -20,12 +20,14 @@ export async function resolveFonts(svg: string, library: FontLibrary, options: {
     let resolved: FontResolution['resolved'] = null;
     for (const family of request.families) {
       if (GENERIC_FAMILIES.has(family.toLowerCase())) continue;
-      let match = library.match(family, request.weight, request.style);
+      const probe = request.text.codePointAt(0);
+      let match = library.match(family, request.weight, request.style, probe);
+      if (match && probe !== undefined && !match.font.hasGlyphForCodePoint(probe)) match = null;
       const exact = match && match.weight === request.weight && !match.syntheticItalic;
       if (!exact && options.google) {
         const key = `${family.toLowerCase()}|${request.weight}|${request.style}`;
-        if (!tried.has(key)) tried.set(key, loadGoogleFont(library, family, request.weight, request.style, options.google).catch(() => false));
-        if (await tried.get(key)) match = library.match(family, request.weight, request.style);
+        if (!tried.has(key)) tried.set(key, loadGoogleFont(library, family, request.weight, request.style, options.google, request.text).catch(() => false));
+        if (await tried.get(key)) match = library.match(family, request.weight, request.style, probe);
       }
       if (match) {
         resolved = { family, source: match.face.source };

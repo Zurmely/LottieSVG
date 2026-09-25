@@ -295,13 +295,20 @@ export function layoutText(root: SvgNode, env: TextEnv): TextLayout | null {
   // Resolve a font per character (browser-style fallback through the family list).
   const missingFamilies = new Set<string>();
   const fontFor = new Map<string, FontMatch | null>();
+  const canonical = new Map<string, FontMatch>();
   const resolve = (c: Char): FontMatch | null => {
     const s = styleFor(c.owner);
     const cp = c.ch.codePointAt(0)!;
     for (const fam of s.families) {
       if (GENERIC_FAMILIES.has(fam.toLowerCase())) continue;
-      const key = `${fam}|${s.weight}|${s.style}`;
-      if (!fontFor.has(key)) fontFor.set(key, env.fonts?.match(fam, s.weight, s.style) ?? null);
+      const key = `${fam}|${s.weight}|${s.style}|${c.ch === ' ' ? 32 : cp}`;
+      if (!fontFor.has(key)) {
+        const found = env.fonts?.match(fam, s.weight, s.style, cp) ?? null;
+        // Share one match object per face+weight so shaping segments aren't split per character.
+        const id = found && `${found.face.family}|${found.face.weightRange}|${found.face.style}|${found.face.data.byteLength}|${found.weight}|${found.syntheticItalic}`;
+        if (id && !canonical.has(id)) canonical.set(id, found!);
+        fontFor.set(key, id ? canonical.get(id)! : null);
+      }
       const m = fontFor.get(key)!;
       if (!m) {
         missingFamilies.add(`${fam} ${s.weight}${s.style !== 'normal' ? ` ${s.style}` : ''}`);

@@ -23,6 +23,9 @@ importers:
       '@lottiefiles/dotlottie-web':
         specifier: ^0.80.0
         version: 0.80.0
+      '@svg2lottie/a11y':
+        specifier: workspace:*
+        version: link:../../packages/a11y
       '@svg2lottie/core':
         specifier: workspace:*
         version: link:../../packages/core

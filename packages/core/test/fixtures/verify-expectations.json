@@ -1,0 +1,10 @@
+{
+  "unsupported.svg": {
+    "reason": "demonstrates features that are skipped with warnings (image, mask, pattern, drop shadow, animateMotion, missing font)",
+    "warnings": ["unsupported-image", "mask", "paint-server", "filter", "unsupported-animateMotion", "font-missing"]
+  },
+  "text-missing-font.svg": {
+    "reason": "the browser falls back to a system font; svg2lottie skips text without a font instead of guessing",
+    "warnings": ["font-missing"]
+  }
+}

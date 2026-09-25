@@ -9,6 +9,10 @@ const META: Record<string, { title: string; blurb: string; order: number }> = {
   gradients: { title: 'Gradients', blurb: 'Linear, radial, stop opacity', order: 3 },
   'clip-and-blur': { title: 'Clip & blur', blurb: 'Clip-path masks, nested Gaussian blur', order: 4 },
   'shapes-static': { title: 'Shapes', blurb: 'Every primitive, dashes, evenodd', order: 5 },
+  'text-figma-style': { title: 'Figma text', blurb: 'Inter from Google Fonts, outlined', order: 1.5 },
+  'text-animated': { title: 'Animated text', blurb: 'CSS + SMIL on outlined glyphs', order: 1.6 },
+  'text-basic': { title: 'Typography', blurb: 'Kerning, anchors, baselines, tspans', order: 5.5 },
+  'text-missing-font': { title: 'Missing font', blurb: 'Clear warning, no raster fallback', order: 6.5 },
   unsupported: { title: 'Unsupported features', blurb: 'See how warnings are reported', order: 6 },
 };
 
@@ -20,7 +24,7 @@ export const EXAMPLES = Object.entries(raw)
   })
   .sort((a, b) => a.order - b.order);
 
-const FEATURES = ['CSS @keyframes', 'SMIL', 'Path morphing', 'Gradients', 'Clip paths', 'Gaussian blur', 'Easing & springs'];
+const FEATURES = ['CSS @keyframes', 'SMIL', 'Text → outlines', 'Google Fonts', 'Path morphing', 'Gradients', 'Clip paths', 'Gaussian blur', 'Accessible labels'];
 
 export function Landing({ onBrowse, onPick }: { onBrowse: () => void; onPick: (ex: { name: string; svg: string }) => void }) {
   return (

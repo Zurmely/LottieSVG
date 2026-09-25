@@ -67,6 +67,22 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
+interface Expectation {
+  reason: string;
+  /** the mismatch is only accepted if the conversion reported all of these warning codes */
+  warnings: string[];
+}
+
+/** `verify-expectations.json` next to a fixture lists files that intentionally differ from the browser. */
+function expectationFor(file: string): Expectation | undefined {
+  try {
+    const table = JSON.parse(readFileSync(join(dirname(file), 'verify-expectations.json'), 'utf8')) as Record<string, Expectation>;
+    return table[basename(file)];
+  } catch {
+    return undefined;
+  }
+}
+
 function sideBySide(images: PNG[], gap = 4): PNG {
   const h = Math.max(...images.map((i) => i.height));
   const w = images.reduce((s, i) => s + i.width, 0) + gap * (images.length - 1);
@@ -173,10 +189,15 @@ async function verifyFile(file: string, args: Args, browser: import('playwright-
   }
 
   const frames = [...new Set(Array.from({ length: args.frames }, (_, k) => Math.round((k * op) / args.frames)))];
+  // Looping animations with a delay are converted to their steady-state loop, which the browser only
+  // reaches after the first cycle, so sample the browser one loop later.
+  const steadyState = result.warnings.some((w) => w.code === 'loop-delay');
+  const svgOffset = steadyState ? op : 0;
+  if (steadyState) console.log(`  steady-state loop: sampling the browser SVG ${op} frames later`);
   const rows: { frame: number; lottieWeb: Diff; dotLottie: Diff }[] = [];
   const sheetRows: PNG[] = [];
   for (const frame of frames) {
-    await page.evaluate(([f, fps]) => (window as unknown as { seek: (f: number, fps: number) => Promise<unknown> }).seek(f, fps), [frame, fr] as const);
+    await page.evaluate(([f, fps, off]) => (window as unknown as { seek: (f: number, fps: number, off: number) => Promise<unknown> }).seek(f, fps, off), [frame, fr, svgOffset] as const);
     const shot = async (sel: string) => PNG.sync.read(await page.locator(sel).screenshot());
     const [s, l, d] = [await shot('#svg'), await shot('#lw'), await shot('#dl')];
     const dl = new PNG({ width: w, height: h });
@@ -210,7 +231,19 @@ async function verifyFile(file: string, args: Args, browser: import('playwright-
   const report = { file, stats: result.stats, warnings: result.warnings, fonts, accessibility: result.accessibility, threshold: args.threshold, maxDiff, frames: rows, browserLogs: logs };
   writeFileSync(join(outDir, 'report.json'), JSON.stringify(report, null, 2));
   const pass = maxLw <= args.threshold && maxDl <= args.threshold;
-  console.log(`${pass ? 'PASS' : 'FAIL'} ${file}: max diff lottie-web ${maxLw.toFixed(2)}%, dotLottie ${maxDl.toFixed(2)}% (threshold ${args.threshold}%) → ${outDir}`);
+  const summary = `max diff lottie-web ${maxLw.toFixed(2)}%, dotLottie ${maxDl.toFixed(2)}% (threshold ${args.threshold}%) → ${outDir}`;
+  const expectation = expectationFor(file);
+  if (!pass && expectation) {
+    const codes = new Set(result.warnings.map((w) => w.code));
+    const missing = expectation.warnings.filter((c) => !codes.has(c));
+    if (!missing.length) {
+      console.log(`XFAIL ${file}: expected mismatch (${expectation.reason}); ${summary}`);
+      return true;
+    }
+    console.log(`FAIL ${file}: expected warnings not reported: ${missing.join(', ')}; ${summary}`);
+    return false;
+  }
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${file}: ${summary}`);
   return pass;
 }
 

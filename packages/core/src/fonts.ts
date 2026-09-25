@@ -130,9 +130,7 @@ export class FontLibrary {
         format,
         source: options.source ?? 'font',
       };
-      const dupe = this.faces.find(
-        (f) => f.family === face.family && f.style === face.style && f.weightRange[0] === face.weightRange[0] && f.weightRange[1] === face.weightRange[1],
-      );
+      const dupe = this.faces.find((f) => f.font === font || (f.data.byteLength === data.byteLength && fingerprint(f.data) === fingerprint(data)));
       if (dupe) {
         for (const n of face.families) if (!dupe.families.includes(n)) dupe.families.push(n);
         added.push(dupe);
@@ -149,10 +147,19 @@ export class FontLibrary {
     return this.faces.some((f) => f.families.some((x) => normalizeFamily(x) === n));
   }
 
-  /** CSS Fonts §5.2 style and weight matching within one family. */
-  match(family: string, weight: number, style: FontStyle): FontMatch | null {
+  /**
+   * CSS Fonts §5.2 style and weight matching within one family. With `codePoint`, faces that lack the
+   * glyph are skipped first (Google Fonts splits families into unicode-range subsets).
+   */
+  match(family: string, weight: number, style: FontStyle, codePoint?: number): FontMatch | null {
     const n = normalizeFamily(family);
-    const candidates = this.faces.filter((f) => f.families.some((x) => normalizeFamily(x) === n));
+    let candidates = this.faces.filter((f) => f.families.some((x) => normalizeFamily(x) === n));
+    if (codePoint !== undefined) {
+      const withGlyph = candidates.filter((f) => f.font.hasGlyphForCodePoint(codePoint));
+      if (withGlyph.length) candidates = withGlyph;
+    }
+    // Fonts the user supplied (directory, upload) win over automatic downloads.
+    candidates = [...candidates.filter((f) => f.source !== 'Google Fonts'), ...candidates.filter((f) => f.source === 'Google Fonts')];
     if (!candidates.length) return null;
     const styleOrder: FontStyle[] = style === 'italic' ? ['italic', 'oblique', 'normal'] : style === 'oblique' ? ['oblique', 'italic', 'normal'] : ['normal', 'oblique', 'italic'];
     let pool: LoadedFace[] = [];
@@ -181,6 +188,13 @@ export class FontLibrary {
     }
     return inst;
   }
+}
+
+function fingerprint(data: Uint8Array): number {
+  let h = 2166136261;
+  const step = Math.max(1, Math.floor(data.length / 4096));
+  for (let i = 0; i < data.length; i += step) h = Math.imul(h ^ data[i], 16777619);
+  return h >>> 0;
 }
 
 function pickWeight(pool: LoadedFace[], desired: number): LoadedFace {
