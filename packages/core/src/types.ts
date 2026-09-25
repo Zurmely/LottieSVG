@@ -1,3 +1,6 @@
+import type { AccessibilityInfo } from './accessibility.js';
+import type { FontLibrary } from './fonts.js';
+
 export type Vec2 = [number, number];
 
 /** A cubic-bezier easing for the segment that starts at a keyframe. */
@@ -71,6 +74,10 @@ export interface ConvertOptions {
   precision?: number;
   /** Emit Lottie Gaussian Blur effects for SVG blur filters (default true). */
   blur?: boolean;
+  /** Fonts used to outline <text>. Without a matching font, text is skipped with a `font-missing` warning. */
+  fonts?: FontLibrary;
+  /** Accessible label override (otherwise: root aria-label, <title>, then the document's text). */
+  alt?: string;
 }
 
 export interface ConversionStats {
@@ -90,5 +97,6 @@ export type LottieAnimation = Record<string, any>;
 export interface ConversionResult {
   animation: LottieAnimation;
   warnings: ConversionWarning[];
+  accessibility: AccessibilityInfo;
   stats: ConversionStats;
 }

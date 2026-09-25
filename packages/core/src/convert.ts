@@ -37,6 +37,9 @@ import type {
   Value,
 } from './types.js';
 import { WarningCollector } from './warnings.js';
+import type { FontLibrary } from './fonts.js';
+import { collectFontRequests, layoutText, truncate, type FontRequest, type TextEnv } from './text.js';
+import { applyAccessibilityMeta, buildAccessibility, type AccessibleText } from './accessibility.js';
 
 const NON_RENDERED = new Set([
   'defs', 'style', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'filter', 'title', 'desc', 'metadata',
@@ -52,6 +55,8 @@ interface Ctx extends TimelineContext, EmitContext {
   assets: Record<string, unknown>[];
   blur: boolean;
   precompCount: number;
+  fonts?: FontLibrary;
+  texts: (AccessibleText & { node?: SvgNode })[];
 }
 
 const interpTransform: Interp<TransformComponents> = (a, b, t) => ({
@@ -776,7 +781,6 @@ function blurEffect(sigma: number): Record<string, unknown> {
 // Tree → shapes / layers
 
 const UNSUPPORTED_ELEMENTS: Record<string, string> = {
-  text: 'Text is not supported; convert text to outlines in Figma before exporting',
   image: '<image> is not supported',
   foreignObject: '<foreignObject> is not supported',
 };
@@ -830,6 +834,25 @@ function emitNode(node: SvgNode, ctx: Ctx, opts: { skipTransform?: boolean; dept
         : [emitNode(ref, ctx, { depth: depth + 1 })].filter(Boolean);
     if (!inner.length) return null;
     content = x || y ? [group('use offset', inner, shapeTransform({ static: { ...IDENTITY_COMPONENTS, position: [x, y] } }, { static: 1 }, ctx))] : inner;
+  } else if (node.tagName === 'text') {
+    const layout = layoutText(node, textEnv(ctx));
+    if (!layout) return null;
+    ctx.texts.push({ node, element: node.label, ...(node.attrs.get('id') ? { id: node.attrs.get('id') } : {}), text: layout.text });
+    const geo: Geometry = { items: [], bbox: { static: layout.bbox } };
+    let ind = 0;
+    content = [...layout.runs]
+      .reverse()
+      .map((run) => {
+        const shapes = run.glyphs.flatMap((g) =>
+          g.path.map((sub, k) => ({ ty: 'sh', nm: g.path.length > 1 ? `${glyphLabel(g.char)} ${k + 1}` : glyphLabel(g.char), ind: ind++, d: 1, ks: staticProp(shapeValue(sub)) })),
+        );
+        const paints = paintItems(run.node, geo, ctx);
+        if (!paints.length) return null;
+        const runText = run.glyphs.map((g) => g.char).join('');
+        return group(`${run.node === node ? 'Text' : run.node.label} "${truncate(runText, 32)}"`, [...shapes, ...paints], shapeTransform({ static: IDENTITY_COMPONENTS }, { static: 1 }, ctx));
+      })
+      .filter(Boolean) as unknown[];
+    if (!content.length) return null;
   } else if (SHAPES.has(node.tagName)) {
     const geo = geometry(node, ctx);
     if (!geo) return null;
@@ -840,7 +863,40 @@ function emitNode(node: SvgNode, ctx: Ctx, opts: { skipTransform?: boolean; dept
     ctx.warnings.add('unknown-element', `<${node.tagName}> is not supported and was ignored`, node.label);
     return null;
   }
-  return wrapWithTransforms(node.attrs.get('id') ?? node.tagName, content, levels, opacity, ctx);
+  return wrapWithTransforms(nodeName(node), content, levels, opacity, ctx);
+}
+
+function glyphLabel(ch: string): string {
+  return ch === ' ' ? 'space' : ch;
+}
+
+/** Layer/group name; text elements carry their string so the Lottie outline stays self-describing. */
+function nodeName(node: SvgNode): string {
+  const id = node.attrs.get('id');
+  if (node.tagName !== 'text') return id ?? node.tagName;
+  const t = collectPlainText(node).trim();
+  return `${id ? `${id}: ` : ''}Text "${truncate(t)}"`;
+}
+
+function collectPlainText(node: SvgNode): string {
+  return node.content.map((c) => (typeof c === 'string' ? c : c.tagName === 'tspan' || c.tagName === 'a' ? collectPlainText(c) : '')).join('').replace(/\s+/g, ' ');
+}
+
+function textEnv(ctx: Ctx): TextEnv {
+  return {
+    fonts: ctx.fonts,
+    warnings: ctx.warnings,
+    length: (value, axis, fontSize) => {
+      if (value === undefined) return null;
+      const t = value.trim();
+      const n = parseFloat(t);
+      if (!Number.isFinite(n)) return null;
+      if (t.endsWith('rem')) return n * 16;
+      if (t.endsWith('em')) return n * fontSize;
+      if (t.endsWith('ex')) return n * fontSize * 0.5;
+      return parseLength(t, axis, ctx);
+    },
+  };
 }
 
 function baseLayer(name: string, ctx: Ctx): Record<string, unknown> {
@@ -873,7 +929,7 @@ function emitLayers(nodes: SvgNode[], ctx: Ctx): Record<string, unknown>[] {
   const layers: Record<string, unknown>[] = [];
   for (const node of [...nodes].reverse()) {
     if (isHidden(node) || NON_RENDERED.has(node.tagName)) continue;
-    const name = node.attrs.get('id') ?? node.tagName;
+    const name = nodeName(node);
     const isContainer = CONTAINERS.has(node.tagName);
     if (isContainer && node.children.some((c) => subtreeNeedsLayer(c, ctx))) {
       const levels = transformChain(node, ctx);
@@ -975,6 +1031,8 @@ export function convertSvg(svg: string, options: ConvertOptions = {}): Conversio
     precompCount: 0,
     animatedProperties: 0,
     keyframes: 0,
+    fonts: options.fonts,
+    texts: [],
   };
   for (const a of doc.animations) {
     if (Number.isFinite(a.iterations) || a.delay === 0) continue;
@@ -1001,12 +1059,20 @@ export function convertSvg(svg: string, options: ConvertOptions = {}): Conversio
   } else numberLayers(layers);
   if (!layers.length) warnings.add('empty', 'No renderable content found', undefined, 'error');
 
+  const docOrder: SvgNode[] = [];
+  const collect = (n: SvgNode) => {
+    if (n.tagName === 'text') docOrder.push(n);
+    n.children.forEach(collect);
+  };
+  collect(doc.root);
+  ctx.texts.sort((a, b) => docOrder.indexOf(a.node!) - docOrder.indexOf(b.node!));
+  const accessibility = buildAccessibility(doc.root, ctx.texts.map(({ node: _n, ...t }) => t), options.alt);
   const name = options.name ?? doc.root.children.find((c) => c.tagName === 'title')?.text.trim() ?? doc.root.attrs.get('id') ?? 'svg2lottie';
   const frames = Math.round(duration * fps);
   const animation: LottieAnimation = roundDeep(
     {
       v: '5.7.4',
-      meta: { g: 'svg2lottie' },
+      meta: applyAccessibilityMeta({ g: 'svg2lottie' }, accessibility),
       fr: fps,
       ip: 0,
       op: frames,
@@ -1023,6 +1089,7 @@ export function convertSvg(svg: string, options: ConvertOptions = {}): Conversio
   return {
     animation,
     warnings: warnings.list,
+    accessibility,
     stats: {
       width: vp.width,
       height: vp.height,
@@ -1034,4 +1101,14 @@ export function convertSvg(svg: string, options: ConvertOptions = {}): Conversio
       keyframes: ctx.keyframes,
     },
   };
+}
+
+/** Fonts the document's text needs, so callers can load them (directory, upload, Google Fonts) first. */
+export function getFontRequests(svg: string): FontRequest[] {
+  const warnings = new WarningCollector();
+  const doc = parseSvgDocument(svg, warnings);
+  const vp = viewport(doc.root, warnings);
+  const ctx = { viewport: { width: vp.width, height: vp.height }, warnings } as Ctx;
+  const env = textEnv(ctx);
+  return collectFontRequests(doc.root, { warnings, length: env.length });
 }

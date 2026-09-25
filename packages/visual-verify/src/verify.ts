@@ -3,7 +3,10 @@
  * converted Lottie in lottie-web, and the .lottie archive in the dotLottie (ThorVG) player, then diffs.
  *
  * Usage: pnpm verify <file.svg|dir...> [--frames 24] [--out verify-output] [--threshold 1.5] [--renderer svg|canvas]
- *        [--convert-options '{"fps":30}']
+ *        [--convert-options '{"fps":30}'] [--fonts dir]... [--no-google-fonts] [--font-cache dir]
+ *
+ * Fonts used to outline <text> are also served to the page as @font-face, so the browser draws the
+ * original text with exactly the same font files.
  */
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -13,7 +16,8 @@ import { fileURLToPath } from 'node:url';
 import pixelmatch from 'pixelmatch';
 import { chromium } from 'playwright-core';
 import { PNG } from 'pngjs';
-import { convertSvg, toDotLottie } from '@svg2lottie/core';
+import { FontLibrary, convertSvg, resolveFonts, toDotLottie } from '@svg2lottie/core';
+import { fsFontCache, loadFontDirectories, nodeFontFetcher } from '@svg2lottie/core/node';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +30,9 @@ interface Args {
   renderer: string;
   chrome: string;
   convert: Record<string, unknown>;
+  fonts: string[];
+  google: boolean;
+  fontCache?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -37,6 +44,8 @@ function parseArgs(argv: string[]): Args {
     renderer: 'svg',
     chrome: process.env.CHROME_PATH ?? '/usr/local/bin/google-chrome',
     convert: {},
+    fonts: [],
+    google: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
@@ -46,6 +55,9 @@ function parseArgs(argv: string[]): Args {
     else if (v === '--renderer') a.renderer = argv[++i];
     else if (v === '--chrome') a.chrome = argv[++i];
     else if (v === '--convert-options') a.convert = JSON.parse(argv[++i]);
+    else if (v === '--fonts') a.fonts.push(argv[++i]);
+    else if (v === '--no-google-fonts') a.google = false;
+    else if (v === '--font-cache') a.fontCache = argv[++i];
     else a.files.push(v);
   }
   if (!a.files.length) {
@@ -53,6 +65,22 @@ function parseArgs(argv: string[]): Args {
     process.exit(2);
   }
   return a;
+}
+
+interface Expectation {
+  reason: string;
+  /** the mismatch is only accepted if the conversion reported all of these warning codes */
+  warnings: string[];
+}
+
+/** `verify-expectations.json` next to a fixture lists files that intentionally differ from the browser. */
+function expectationFor(file: string): Expectation | undefined {
+  try {
+    const table = JSON.parse(readFileSync(join(dirname(file), 'verify-expectations.json'), 'utf8')) as Record<string, Expectation>;
+    return table[basename(file)];
+  } catch {
+    return undefined;
+  }
 }
 
 function sideBySide(images: PNG[], gap = 4): PNG {
@@ -98,9 +126,25 @@ function diff(a: PNG, b: PNG, diffOut: PNG): Diff {
   return { pct: (100 * n) / px, mae: sum / (px * 3), strictPct: (100 * strict) / px, finePct: (100 * fine) / px };
 }
 
-async function verifyFile(file: string, args: Args, browser: import('playwright-core').Browser) {
+function fontFaceCss(library: FontLibrary): string {
+  return library.faces
+    .flatMap((face, i) =>
+      face.families.map(
+        (family) =>
+          `@font-face { font-family: ${JSON.stringify(family)}; src: url(/font/${i}) format('${face.format}'); font-weight: ${face.weightRange[0]} ${face.weightRange[1]}; font-style: ${face.style}; }`,
+      ),
+    )
+    .join('\n');
+}
+
+async function verifyFile(file: string, args: Args, browser: import('playwright-core').Browser, library: FontLibrary) {
   const svg = readFileSync(file, 'utf8');
-  const result = convertSvg(svg, args.convert);
+  const fonts = await resolveFonts(svg, library, { google: args.google ? { fetcher: nodeFontFetcher, cache: fsFontCache(args.fontCache) } : false });
+  for (const f of fonts) {
+    const what = `${f.request.families.join(', ')} ${f.request.weight}${f.request.style !== 'normal' ? ` ${f.request.style}` : ''}`;
+    console.log(`  font ${what}: ${f.resolved ? `${f.resolved.family} (${f.resolved.source})` : 'MISSING'}`);
+  }
+  const result = convertSvg(svg, { ...args.convert, fonts: library });
   const json = JSON.stringify(result.animation);
   const dot = toDotLottie(result.animation, { id: basename(file).replace(/\.svg$/i, '') });
   const { w, h, fr, op } = result.animation as { w: number; h: number; fr: number; op: number };
@@ -114,6 +158,8 @@ async function verifyFile(file: string, args: Args, browser: import('playwright-
     '/input.svg': ['image/svg+xml', svg],
     '/anim.json': ['application/json', json],
     '/anim.lottie': ['application/zip', dot],
+    '/fonts.css': ['text/css', fontFaceCss(library)],
+    ...Object.fromEntries(library.faces.map((face, i) => [`/font/${i}`, [`font/${face.format === 'opentype' ? 'otf' : face.format === 'truetype' ? 'ttf' : face.format}`, face.data] as [string, Uint8Array]])),
     '/lottie.js': ['text/javascript', readFileSync(require.resolve('lottie-web/build/player/lottie.min.js'))],
     '/dotlottie.js': ['text/javascript', readFileSync(join(dirname(require.resolve('@lottiefiles/dotlottie-web')), 'index.js'))],
     '/dotlottie-player.wasm': ['application/wasm', readFileSync(join(dirname(require.resolve('@lottiefiles/dotlottie-web')), 'dotlottie-player.wasm'))],
@@ -143,10 +189,15 @@ async function verifyFile(file: string, args: Args, browser: import('playwright-
   }
 
   const frames = [...new Set(Array.from({ length: args.frames }, (_, k) => Math.round((k * op) / args.frames)))];
+  // Looping animations with a delay are converted to their steady-state loop, which the browser only
+  // reaches after the first cycle, so sample the browser one loop later.
+  const steadyState = result.warnings.some((w) => w.code === 'loop-delay');
+  const svgOffset = steadyState ? op : 0;
+  if (steadyState) console.log(`  steady-state loop: sampling the browser SVG ${op} frames later`);
   const rows: { frame: number; lottieWeb: Diff; dotLottie: Diff }[] = [];
   const sheetRows: PNG[] = [];
   for (const frame of frames) {
-    await page.evaluate(([f, fps]) => (window as unknown as { seek: (f: number, fps: number) => Promise<unknown> }).seek(f, fps), [frame, fr] as const);
+    await page.evaluate(([f, fps, off]) => (window as unknown as { seek: (f: number, fps: number, off: number) => Promise<unknown> }).seek(f, fps, off), [frame, fr, svgOffset] as const);
     const shot = async (sel: string) => PNG.sync.read(await page.locator(sel).screenshot());
     const [s, l, d] = [await shot('#svg'), await shot('#lw'), await shot('#dl')];
     const dl = new PNG({ width: w, height: h });
@@ -177,15 +228,27 @@ async function verifyFile(file: string, args: Args, browser: import('playwright-
   const maxDiff = Object.fromEntries(
     (['lottieWeb', 'dotLottie'] as const).map((k) => [k, { pct: max(k, 'pct'), strictPct: max(k, 'strictPct'), finePct: max(k, 'finePct'), mae: max(k, 'mae') }]),
   );
-  const report = { file, stats: result.stats, warnings: result.warnings, threshold: args.threshold, maxDiff, frames: rows, browserLogs: logs };
+  const report = { file, stats: result.stats, warnings: result.warnings, fonts, accessibility: result.accessibility, threshold: args.threshold, maxDiff, frames: rows, browserLogs: logs };
   writeFileSync(join(outDir, 'report.json'), JSON.stringify(report, null, 2));
   const pass = maxLw <= args.threshold && maxDl <= args.threshold;
-  console.log(`${pass ? 'PASS' : 'FAIL'} ${file}: max diff lottie-web ${maxLw.toFixed(2)}%, dotLottie ${maxDl.toFixed(2)}% (threshold ${args.threshold}%) → ${outDir}`);
+  const summary = `max diff lottie-web ${maxLw.toFixed(2)}%, dotLottie ${maxDl.toFixed(2)}% (threshold ${args.threshold}%) → ${outDir}`;
+  const expectation = expectationFor(file);
+  if (!pass && expectation) {
+    const codes = new Set(result.warnings.map((w) => w.code));
+    const missing = expectation.warnings.filter((c) => !codes.has(c));
+    if (!missing.length) {
+      console.log(`XFAIL ${file}: expected mismatch (${expectation.reason}); ${summary}`);
+      return true;
+    }
+    console.log(`FAIL ${file}: expected warnings not reported: ${missing.join(', ')}; ${summary}`);
+    return false;
+  }
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${file}: ${summary}`);
   return pass;
 }
 
 const args = parseArgs(process.argv.slice(2));
-const browser = await chromium.launch({ executablePath: args.chrome, args: ['--disable-gpu', '--force-color-profile=srgb', '--font-render-hinting=none'] });
+const browser = await chromium.launch({ executablePath: args.chrome, args: ['--disable-gpu', '--force-color-profile=srgb', '--font-render-hinting=none', '--disable-lcd-text'] });
 // pnpm runs scripts from the package directory; resolve paths against where the user invoked it.
 const cwd = process.env.INIT_CWD ?? process.cwd();
 const inputs = args.files.flatMap((f) => {
@@ -193,10 +256,13 @@ const inputs = args.files.flatMap((f) => {
   return statSync(p).isDirectory() ? readdirSync(p).filter((n) => n.toLowerCase().endsWith('.svg')).sort().map((n) => join(p, n)) : [p];
 });
 args.out = resolve(cwd, args.out);
+const library = new FontLibrary();
+const fontLoad = loadFontDirectories(library, args.fonts.map((d) => resolve(cwd, d)));
+fontLoad.errors.forEach((e) => console.warn(`font: ${e}`));
 let ok = true;
 for (const f of inputs) {
   console.log(`Verifying ${f}`);
-  ok = (await verifyFile(f, args, browser)) && ok;
+  ok = (await verifyFile(f, args, browser, library)) && ok;
 }
 await browser.close();
 process.exit(ok ? 0 : 1);

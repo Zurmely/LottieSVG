@@ -1,4 +1,5 @@
 import { strToU8, unzipSync, zipSync, strFromU8 } from 'fflate';
+import { getAccessibility } from './accessibility.js';
 import type { LottieAnimation } from './types.js';
 
 export interface DotLottieOptions {
@@ -13,10 +14,12 @@ export interface DotLottieOptions {
  * Package a Lottie animation as a dotLottie archive. The manifest carries both the v1 fields
  * (`version`, `author`, `generator`, per-animation `loop`/`autoplay`/`speed`) and the v2 layout
  * (`animations/<id>.json`), which every current dotLottie player (dotlottie-web/ThorVG, the legacy
- * dotlottie-player, lottie-react via dotLottie loaders) accepts.
+ * dotlottie-player, lottie-react via dotLottie loaders) accepts. Accessibility metadata is copied into the
+ * manifest (`description` + `accessibility`) so players can label the animation without parsing it.
  */
 export function toDotLottie(animation: LottieAnimation, options: DotLottieOptions = {}): Uint8Array {
   const id = sanitizeId(options.id ?? 'animation');
+  const a11y = getAccessibility(animation);
   const manifest = {
     version: '1',
     generator: options.generator ?? 'svg2lottie',
@@ -31,6 +34,8 @@ export function toDotLottie(animation: LottieAnimation, options: DotLottieOption
       },
     ],
     activeAnimationId: id,
+    ...(a11y?.label ? { description: a11y.label } : {}),
+    ...(a11y ? { accessibility: a11y } : {}),
   };
   return zipSync(
     {

@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { Command, InvalidArgumentError } from 'commander';
-import { convertSvg, toDotLottie, type ConversionWarning } from '@svg2lottie/core';
+import { FontLibrary, convertSvg, resolveFonts, toDotLottie, type ConversionWarning, type GoogleFontsOptions } from '@svg2lottie/core';
+import { fsFontCache, loadFontDirectories, nodeFontFetcher } from '@svg2lottie/core/node';
 
 export interface Io {
   stdout: (s: string) => void;
@@ -23,6 +24,10 @@ interface Options {
   quiet: boolean;
   blur: boolean;
   recursive: boolean;
+  fonts: string[];
+  googleFonts: boolean;
+  fontCache?: string;
+  alt?: string;
 }
 
 const positiveNumber = (v: string) => {
@@ -56,7 +61,7 @@ function formatWarning(w: ConversionWarning): string {
   return `  ${w.severity === 'info' ? 'info' : w.severity}${where}: ${w.message} (${w.code})`;
 }
 
-export function run(argv: string[], io: Io): number {
+export async function run(argv: string[], io: Io, deps: { google?: GoogleFontsOptions } = {}): Promise<number> {
   const program = new Command()
     .name('svg2lottie')
     .description('Convert animated SVG (Figma Motion, CSS @keyframes, SMIL) to Lottie JSON and dotLottie.')
@@ -70,6 +75,10 @@ export function run(argv: string[], io: Io): number {
     .option('--precision <n>', 'decimal places in output', (v) => parseInt(v, 10), 3)
     .option('--max-duration <s>', 'cap for the unrolled loop length in seconds', positiveNumber, 30)
     .option('--no-blur', 'drop blur filters instead of emitting Lottie blur effects')
+    .option('--fonts <dir>', 'font files (ttf/otf/woff/woff2) used to outline <text>; repeatable', (v: string, acc: string[]) => [...acc, v], [] as string[])
+    .option('--no-google-fonts', 'do not download missing fonts from Google Fonts')
+    .option('--font-cache <dir>', 'cache directory for downloaded fonts (default ~/.cache/svg2lottie/fonts)')
+    .option('--alt <text>', 'accessible label written to the Lottie metadata and dotLottie manifest')
     .option('-r, --recursive', 'recurse into subdirectories', false)
     .option('--pretty', 'pretty-print JSON', false)
     .option('--strict', 'exit with code 1 if any warning is reported', false)
@@ -85,11 +94,25 @@ export function run(argv: string[], io: Io): number {
   }
   const opts = program.opts<Options>();
   const inputs = program.args;
-  const convertOptions = { fps: opts.fps, precision: opts.precision, maxDuration: opts.maxDuration, blur: opts.blur };
+  const library = new FontLibrary();
+  const fontLoad = loadFontDirectories(library, opts.fonts);
+  for (const e of fontLoad.errors) io.stderr(`warning: ${e}`);
+  const google = opts.googleFonts ? (deps.google ?? { fetcher: nodeFontFetcher, cache: fsFontCache(opts.fontCache) }) : false;
+  const convertOptions = { fps: opts.fps, precision: opts.precision, maxDuration: opts.maxDuration, blur: opts.blur, fonts: library, alt: opts.alt };
+  const prepare = async (svg: string) => {
+    const needed = await resolveFonts(svg, library, { google });
+    if (!opts.quiet) {
+      for (const r of needed.filter((n) => n.resolved?.source === 'Google Fonts')) {
+        io.stderr(`  font: ${r.resolved!.family} ${r.request.weight}${r.request.style !== 'normal' ? ` ${r.request.style}` : ''} from Google Fonts`);
+      }
+    }
+  };
 
   if (inputs.length === 1 && inputs[0] === '-') {
     try {
-      const result = convertSvg(io.readStdin(), convertOptions);
+      const svg = io.readStdin();
+      await prepare(svg);
+      const result = convertSvg(svg, convertOptions);
       result.warnings.forEach((w) => !opts.quiet && io.stderr(formatWarning(w)));
       if (opts.output) writeOutputs(result.animation, opts.output, resolveFormats(opts.format, opts.output), opts.pretty, 'animation');
       else io.writeStdout(JSON.stringify(result.animation, null, opts.pretty ? 2 : undefined));
@@ -118,7 +141,9 @@ export function run(argv: string[], io: Io): number {
   for (const { file, root } of files) {
     const stem = basename(file, extname(file));
     try {
-      const result = convertSvg(readFileSync(file, 'utf8'), { ...convertOptions, name: stem });
+      const svg = readFileSync(file, 'utf8');
+      await prepare(svg);
+      const result = convertSvg(svg, { ...convertOptions, name: stem });
       let base: string;
       if (outIsFile) base = opts.output!.replace(/\.(json|lottie)$/i, '');
       else {

@@ -1,0 +1,25 @@
+{
+  "name": "@svg2lottie/a11y",
+  "version": "0.1.0",
+  "description": "Tiny, dependency-free helper that labels Lottie/dotLottie players from svg2lottie accessibility metadata",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
+  },
+  "license": "MIT"
+}

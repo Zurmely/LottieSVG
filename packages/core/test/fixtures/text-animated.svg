@@ -1,0 +1,14 @@
+<svg width="400" height="200" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Hello Lottie banner</title>
+  <style>
+    @keyframes pop {
+      0%, 100% { transform: translate(200px, 110px) scale(0.7); opacity: 0.3; }
+      50% { transform: translate(200px, 110px) scale(1.1); opacity: 1; }
+    }
+    #headline { animation: pop 2s ease-in-out infinite; font: italic 700 44px Roboto, sans-serif; }
+    .sub { font-family: Roboto; font-size: 18px; fill: #94a3b8; }
+  </style>
+  <rect width="400" height="200" fill="#0f172a"/>
+  <text id="headline" text-anchor="middle" dominant-baseline="central" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1">Hello Lottie<animate attributeName="fill" values="#38bdf8;#f472b6;#38bdf8" dur="2s" repeatCount="indefinite"/></text>
+  <text class="sub" x="200" y="180" text-anchor="middle">Text <tspan font-weight="bold">outlined</tspan> by svg2lottie</text>
+</svg>

@@ -2,10 +2,26 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client"
+    ],
     "declaration": false,
-    "paths": { "@svg2lottie/core": ["../../packages/core/src/index.ts"] }
+    "paths": {
+      "@svg2lottie/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@svg2lottie/a11y": [
+        "../../packages/a11y/src/index.ts"
+      ]
+    }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
 }

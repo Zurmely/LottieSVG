@@ -14,7 +14,8 @@
     "@svg2lottie/core": "workspace:*",
     "lottie-web": "^5.13.0",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "@svg2lottie/a11y": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

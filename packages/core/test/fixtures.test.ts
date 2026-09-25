@@ -186,7 +186,7 @@ describe('feature fixtures', () => {
   it('unsupported features are reported, not silently dropped', () => {
     const { warnings } = convertSvg(load('unsupported.svg'));
     const codes = new Set(warnings.map((w) => w.code));
-    for (const c of ['unsupported-text', 'unsupported-image', 'mask', 'paint-server', 'filter', 'unsupported-animateMotion']) expect(codes).toContain(c);
+    for (const c of ['font-missing', 'unsupported-image', 'mask', 'paint-server', 'filter', 'unsupported-animateMotion']) expect(codes).toContain(c);
   });
 });
 
