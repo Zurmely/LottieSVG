@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "tsx src/verify.ts",
+    "verify": "pnpm --filter @svg2lottie/core build && tsx src/verify.ts",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

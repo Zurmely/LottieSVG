@@ -2,10 +2,10 @@
  * Frame-by-frame fidelity check: renders the source SVG in Chrome (animations paused and seeked), the
  * converted Lottie in lottie-web, and the .lottie archive in the dotLottie (ThorVG) player, then diffs.
  *
- * Usage: pnpm verify <file.svg...> [--frames 24] [--out verify-output] [--threshold 1.5] [--renderer svg|canvas]
+ * Usage: pnpm verify <file.svg|dir...> [--frames 24] [--out verify-output] [--threshold 1.5] [--renderer svg|canvas]
  *        [--convert-options '{"fps":30}']
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -186,10 +186,17 @@ async function verifyFile(file: string, args: Args, browser: import('playwright-
 
 const args = parseArgs(process.argv.slice(2));
 const browser = await chromium.launch({ executablePath: args.chrome, args: ['--disable-gpu', '--force-color-profile=srgb', '--font-render-hinting=none'] });
+// pnpm runs scripts from the package directory; resolve paths against where the user invoked it.
+const cwd = process.env.INIT_CWD ?? process.cwd();
+const inputs = args.files.flatMap((f) => {
+  const p = resolve(cwd, f);
+  return statSync(p).isDirectory() ? readdirSync(p).filter((n) => n.toLowerCase().endsWith('.svg')).sort().map((n) => join(p, n)) : [p];
+});
+args.out = resolve(cwd, args.out);
 let ok = true;
-for (const f of args.files) {
+for (const f of inputs) {
   console.log(`Verifying ${f}`);
-  ok = (await verifyFile(resolve(f), args, browser)) && ok;
+  ok = (await verifyFile(f, args, browser)) && ok;
 }
 await browser.close();
 process.exit(ok ? 0 : 1);

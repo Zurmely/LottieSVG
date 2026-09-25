@@ -7,10 +7,11 @@ export interface EmitContext {
   keyframes: number;
 }
 
-function toFrame(t: number, fps: number): number {
+/** Seconds → frames, snapping near-integers (e.g. Figma's rounded 1.67% offsets) unless that would collide. */
+function toFrame(t: number, fps: number, previous: number): number {
   const f = t * fps;
   const r = Math.round(f);
-  if (Math.abs(f - r) < 0.02) return r;
+  if (Math.abs(f - r) < 0.02 && r > previous) return r;
   return Math.round(f * 1000) / 1000;
 }
 
@@ -26,7 +27,7 @@ export function prop<T extends Value>(value: Animatable<T>, map: (v: T) => Scala
   let lastFrame = -Infinity;
   for (let i = 0; i < kfs.length; i++) {
     const kf = kfs[i];
-    const t = toFrame(kf.t, ctx.fps);
+    const t = toFrame(kf.t, ctx.fps, lastFrame);
     const mapped = map(kf.v);
     const s = typeof mapped === 'number' ? [mapped] : Array.isArray(mapped) ? mapped : [mapped];
     const entry: Record<string, unknown> = { t, s };

@@ -1,0 +1,20 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes bob { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-30px); } }
+    @keyframes pulse { to { opacity: 0.25; fill: #ffd166; } }
+    @keyframes draw { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }
+    @keyframes tick { from { transform: translateX(0px); } to { transform: translateX(80px); } }
+    .spinner { transform-origin: 60px 60px; animation: spin 3s linear infinite; }
+    #bobber { animation: bob 1.5s ease-in-out infinite; }
+    .pulse { animation: pulse 1s ease-in 0.5s infinite alternate; }
+    .line { stroke-dasharray: 300; animation: draw 3s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+    #stepper { animation: tick 3s steps(4, end) infinite; }
+  </style>
+  <rect width="200" height="200" fill="#1b1b2f"/>
+  <rect class="spinner" x="40" y="40" width="40" height="40" rx="6" fill="#ef476f"/>
+  <circle id="bobber" cx="150" cy="70" r="15" fill="#06d6a0"/>
+  <rect class="pulse" x="120" y="110" width="50" height="30" fill="#118ab2"/>
+  <path class="line" d="M20 170 C 60 110, 100 200, 140 150" fill="none" stroke="#ffd166" stroke-width="4" stroke-linecap="round"/>
+  <rect id="stepper" x="20" y="120" width="12" height="12" fill="#f78c6b"/>
+</svg>

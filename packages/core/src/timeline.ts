@@ -25,7 +25,6 @@ export interface TrackOptions<T extends Value> {
   property: string;
 }
 
-const EPS = 1e-3;
 
 export const lerpNumber: Interp<number> = (a, b, t) => a + (b - a) * t;
 export const lerpArray: Interp<number[]> = (a, b, t) => a.map((v, k) => v + ((b[k] ?? v) - v) * t);
@@ -119,14 +118,18 @@ function isReversed(dir: PropAnimation['direction'], i: number): boolean {
   }
 }
 
-function pushFrame<T extends Value>(out: Keyframe<T>[], kf: Keyframe<T>, equals: (a: T, b: T) => boolean): void {
+/**
+ * Lottie cannot hold two values at one instant, so a jump (e.g. a loop restarting) is encoded as a hold
+ * keyframe `eps` before the new value. `eps` is a small fraction of a frame so no rendered frame changes.
+ */
+function pushFrame<T extends Value>(out: Keyframe<T>[], kf: Keyframe<T>, equals: (a: T, b: T) => boolean, eps: number): void {
   const last = out[out.length - 1];
   if (last && Math.abs(last.t - kf.t) < 1e-6) {
     if (equals(last.v, kf.v)) {
       last.ease = kf.ease;
       return;
     }
-    last.t = kf.t - EPS;
+    last.t = kf.t - eps;
     last.ease = 'hold';
     const beforeLast = out[out.length - 2];
     if (beforeLast && beforeLast.t >= last.t) out.splice(out.length - 2, 1);
@@ -164,6 +167,7 @@ export function unrollAnimation<T extends Value>(anim: PropAnimation, opts: Trac
 
   const D = ctx.duration;
   const dur = anim.duration;
+  const eps = 0.05 / ctx.fps;
   const out: Keyframe<T>[] = [];
   const infinite = !Number.isFinite(anim.iterations);
   let first = 0;
@@ -189,16 +193,16 @@ export function unrollAnimation<T extends Value>(anim: PropAnimation, opts: Trac
         const split = splitEase(p.ease, x);
         const prevOut = out[out.length - 1];
         prevOut.ease = split.left;
-        pushFrame(out, { t: start + fraction * dur, v: p.ease === 'hold' ? p.v : opts.interp(p.v, f.v, split.y), ease: 'hold' }, equals);
+        pushFrame(out, { t: start + fraction * dur, v: p.ease === 'hold' ? p.v : opts.interp(p.v, f.v, split.y), ease: 'hold' }, equals, eps);
         break;
       }
-      pushFrame(out, { t: start + f.offset * dur, v: f.v, ease: f.ease }, equals);
+      pushFrame(out, { t: start + f.offset * dur, v: f.v, ease: f.ease }, equals, eps);
     }
   }
   if (!infinite) {
     const end = anim.delay + anim.iterations * dur;
     out[out.length - 1].ease = 'hold';
-    if (!anim.fillForwards) pushFrame(out, { t: end, v: opts.base, ease: 'hold' }, equals);
+    if (!anim.fillForwards) pushFrame(out, { t: end, v: opts.base, ease: 'hold' }, equals, eps);
   }
   return clipToTimeline(out, opts.interp, D);
 }

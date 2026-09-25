@@ -1,7 +1,7 @@
 import { parseColor, type RGBA } from './color.js';
 import { parseSvgDocument, type PropAnimation, type PropState, type SvgDocument, type SvgNode } from './document.js';
 import { group, layerTransform, prop, roundDeep, shapeTransform, shapeValue, staticProp, type EmitContext } from './lottie.js';
-import { IDENTITY, isIdentity, multiply, scale as scaleM, translate as translateM, type Matrix, apply } from './matrix.js';
+import { IDENTITY, apply, applyVector, isIdentity, multiply, scale as scaleM, translate as translateM, type Matrix } from './matrix.js';
 import {
   ellipsePath,
   parsePathData,
@@ -262,8 +262,8 @@ function staticMatrixOf(levels: TransformLevel[]): Matrix | null {
 
 interface Geometry {
   items: Record<string, unknown>[];
-  /** static-geometry bounding box, for objectBoundingBox gradients */
-  bbox: BBox;
+  /** [x, y, width, height], for objectBoundingBox gradients */
+  bbox: Animatable<number[]>;
 }
 
 function pathItems(paths: Animatable<PathData>, name: string, ctx: Ctx): Record<string, unknown>[] {
@@ -314,6 +314,13 @@ function safeParsePath(s: string, node: SvgNode, ctx: Ctx): PathData | null {
   }
 }
 
+function bboxOf(paths: Animatable<PathData>): Animatable<number[]> {
+  return mapAnimatable(paths, (p) => {
+    const b = pathBBox(p);
+    return [b.x, b.y, b.width, b.height];
+  });
+}
+
 function geometry(node: SvgNode, ctx: Ctx): Geometry | null {
   const n = (name: string, axis: 'x' | 'y' | 'xy', def = 0) => numberAnim(node, name, axis, def, ctx);
   const I = lerpNumber as Interp<Value>;
@@ -332,12 +339,12 @@ function geometry(node: SvgNode, ctx: Ctx): Geometry | null {
       const W = firstValue(w);
       const H = firstValue(h);
       if (W <= 0 || H <= 0) return null;
-      const bbox = { x: firstValue(x), y: firstValue(y), width: W, height: H };
+      const bbox = combine([{ value: x, interp: I }, { value: y, interp: I }, { value: w, interp: I }, { value: h, interp: I }], (v) => v as number[], ctx, node.label);
       const rxv = firstValue(rx);
       const ryv = firstValue(ry);
       const clampedDiffer = Math.abs(Math.min(rxv, W / 2) - Math.min(ryv, H / 2)) > 1e-6;
       if (clampedDiffer && !isAnimated(rx) && !isAnimated(ry) && !isAnimated(w) && !isAnimated(h) && !isAnimated(x) && !isAnimated(y)) {
-        return { items: pathItems({ static: [rectPath(bbox.x, bbox.y, W, H, rxv, ryv)] }, 'Rect', ctx), bbox };
+        return { items: pathItems({ static: [rectPath(firstValue(x), firstValue(y), W, H, rxv, ryv)] }, 'Rect', ctx), bbox };
       }
       if (clampedDiffer) ctx.warnings.add('rect-radius', 'Animated rect with different rx/ry uses rx for both corners', node.label);
       const p = combine([{ value: x, interp: I }, { value: y, interp: I }, { value: w, interp: I }, { value: h, interp: I }], (v) => [(v[0] as number) + (v[2] as number) / 2, (v[1] as number) + (v[3] as number) / 2], ctx, node.label);
@@ -363,13 +370,21 @@ function geometry(node: SvgNode, ctx: Ctx): Geometry | null {
       if (firstValue(rx) <= 0 && !isAnimated(rx)) return null;
       const p = combine([{ value: cx, interp: I }, { value: cy, interp: I }], (v) => [v[0] as number, v[1] as number], ctx, node.label);
       const s = combine([{ value: rx, interp: I }, { value: ry, interp: I }], (v) => [(v[0] as number) * 2, (v[1] as number) * 2], ctx, node.label);
-      const bbox = { x: firstValue(cx) - firstValue(rx), y: firstValue(cy) - firstValue(ry), width: 2 * firstValue(rx), height: 2 * firstValue(ry) };
+      const bbox = combine(
+        [{ value: cx, interp: I }, { value: cy, interp: I }, { value: rx, interp: I }, { value: ry, interp: I }],
+        (v) => {
+          const [a, b, c, d] = v as number[];
+          return [a - c, b - d, 2 * c, 2 * d];
+        },
+        ctx,
+        node.label,
+      );
       return { items: [{ ty: 'el', nm: 'Ellipse', d: 1, p: prop(p, (v) => v as number[], ctx), s: prop(s, (v) => v as number[], ctx) }], bbox };
     }
     case 'line': {
       const vals = ['x1', 'y1', 'x2', 'y2'].map((a, k) => ({ value: n(a, k % 2 ? 'y' : 'x'), interp: I }));
       const paths = combine(vals, (v) => [polyPath(v as number[], false)] as PathData, ctx, node.label);
-      return { items: pathItems(paths, 'Line', ctx), bbox: pathBBox(firstValue(paths)) };
+      return { items: pathItems(paths, 'Line', ctx), bbox: bboxOf(paths) };
     }
     case 'polyline':
     case 'polygon': {
@@ -378,13 +393,13 @@ function geometry(node: SvgNode, ctx: Ctx): Geometry | null {
       const base = parse(staticValue(node, 'points') ?? '');
       if (base[0].v.length < 2 && !hasAnims(node, 'points')) return null;
       const paths = pathAnim(node, 'points', base, parse, ctx);
-      return { items: pathItems(paths, closed ? 'Polygon' : 'Polyline', ctx), bbox: pathBBox(firstValue(paths)) };
+      return { items: pathItems(paths, closed ? 'Polygon' : 'Polyline', ctx), bbox: bboxOf(paths) };
     }
     case 'path': {
       const base = safeParsePath(staticValue(node, 'd') ?? '', node, ctx) ?? [];
       if (!base.length && !hasAnims(node, 'd')) return null;
       const paths = pathAnim(node, 'd', base, (s) => safeParsePath(s, node, ctx), ctx);
-      return { items: pathItems(paths, 'Path', ctx), bbox: pathBBox(firstValue(paths)) };
+      return { items: pathItems(paths, 'Path', ctx), bbox: bboxOf(paths) };
     }
   }
   return null;
@@ -441,31 +456,48 @@ function gradientItem(kind: 'fill' | 'stroke', g: SvgNode, geo: Geometry, opacit
 
   const units = gradientAttr(g, 'gradientUnits', ctx) ?? 'objectBoundingBox';
   const bboxUnits = units !== 'userSpaceOnUse';
-  const gt = parseTransformList(gradientAttr(g, 'gradientTransform', ctx));
-  let m: Matrix = opsToMatrix(gt.ops);
-  if (bboxUnits) m = multiply(multiply(translateM(geo.bbox.x, geo.bbox.y), scaleM(geo.bbox.width, geo.bbox.height)), m);
+  const gm: Matrix = opsToMatrix(parseTransformList(gradientAttr(g, 'gradientTransform', ctx)).ops);
+  const matrixFor = (b: number[]): Matrix => (bboxUnits ? multiply(multiply(translateM(b[0], b[1]), scaleM(b[2], b[3])), gm) : gm);
   const len = (name: string, def: string, axis: 'x' | 'y' | 'xy') => {
     const v = gradientAttr(g, name, ctx) ?? def;
     if (bboxUnits) return v.trim().endsWith('%') ? parseFloat(v) / 100 : parseFloat(v);
     return parseLength(v, axis, ctx) ?? 0;
   };
-  const nonUniform = Math.abs(Math.hypot(m[0], m[1]) - Math.hypot(m[2], m[3])) > 1e-6 || Math.abs(m[0] * m[2] + m[1] * m[3]) > 1e-6;
+  const bbox: Animatable<number[]> = bboxUnits ? geo.bbox : { static: [0, 0, 1, 1] };
+  const m0 = matrixFor(firstValue(bbox));
+  const nonUniform = Math.abs(Math.hypot(m0[0], m0[1]) - Math.hypot(m0[2], m0[3])) > 1e-6 || Math.abs(m0[0] * m0[2] + m0[1] * m0[3]) > 1e-6;
   let item: Record<string, unknown>;
   if (g.tagName === 'linearGradient') {
-    const s = apply(m, [len('x1', '0%', 'x'), len('y1', '0%', 'y')]);
-    const e = apply(m, [len('x2', '100%', 'x'), len('y2', '0%', 'y')]);
-    if (nonUniform) ctx.warnings.add('gradient-transform', 'Linear gradient with skew/non-uniform scale approximated', node.label);
-    item = { t: 1, s: staticProp(s), e: staticProp(e) };
+    const p1: [number, number] = [len('x1', '0%', 'x'), len('y1', '0%', 'y')];
+    const p2: [number, number] = [len('x2', '100%', 'x'), len('y2', '0%', 'y')];
+    // Under an affine map, isolines stay parallel but may no longer be perpendicular to the mapped
+    // gradient vector; project the mapped end point onto the normal of the mapped isolines instead.
+    const ends = mapAnimatable(bbox, (b) => {
+      const m = matrixFor(b);
+      const s0 = apply(m, p1);
+      const e0 = apply(m, p2);
+      const iso = applyVector(m, [-(p2[1] - p1[1]), p2[0] - p1[0]]);
+      const n: [number, number] = [iso[1], -iso[0]];
+      const nn = n[0] * n[0] + n[1] * n[1];
+      if (nn < 1e-12) return [s0[0], s0[1], e0[0], e0[1]];
+      const k = ((e0[0] - s0[0]) * n[0] + (e0[1] - s0[1]) * n[1]) / nn;
+      return [s0[0], s0[1], s0[0] + k * n[0], s0[1] + k * n[1]];
+    });
+    item = { t: 1, s: prop(ends, (v) => [v[0], v[1]], ctx), e: prop(ends, (v) => [v[2], v[3]], ctx) };
   } else {
     const cx = len('cx', '50%', 'x');
     const cy = len('cy', '50%', 'y');
     const r = len('r', '50%', 'xy');
-    const c = apply(m, [cx, cy]);
-    const e = apply(m, [cx + r, cy]);
+    const ends = mapAnimatable(bbox, (b) => {
+      const m = matrixFor(b);
+      const c = apply(m, [cx, cy]);
+      const e = apply(m, [cx + r, cy]);
+      return [c[0], c[1], e[0], e[1]];
+    });
     if (nonUniform) ctx.warnings.add('gradient-transform', 'Elliptical radial gradient approximated as circular (Lottie radial gradients are circular)', node.label);
     const fx = gradientAttr(g, 'fx', ctx);
     const fy = gradientAttr(g, 'fy', ctx);
-    item = { t: 2, s: staticProp(c), e: staticProp(e), h: staticProp(0), a: staticProp(0) };
+    item = { t: 2, s: prop(ends, (v) => [v[0], v[1]], ctx), e: prop(ends, (v) => [v[2], v[3]], ctx), h: staticProp(0), a: staticProp(0) };
     if ((fx !== undefined && len('fx', '50%', 'x') !== cx) || (fy !== undefined && len('fy', '50%', 'y') !== cy)) {
       ctx.warnings.add('gradient-focal', 'Radial gradient focal point (fx/fy) ignored', node.label);
     }
@@ -655,7 +687,6 @@ function subtreeNeedsLayer(node: SvgNode, ctx: Ctx): boolean {
 
 function layerFeatures(node: SvgNode, levels: TransformLevel[], ctx: Ctx): LayerFeatures {
   const features: LayerFeatures = { effects: [], masks: [], masksInLocalSpace: true };
-  if (staticValue(node, 'mask')?.startsWith('url(')) ctx.warnings.add('mask', '<mask> is not supported and was ignored (use clip-path for hard-edged clipping)', node.label);
   const f = blurFilter(node, ctx);
   if (typeof f === 'object') {
     if (!ctx.blur) ctx.warnings.add('filter', 'Blur filter dropped (blur output disabled)', node.label);
@@ -761,10 +792,17 @@ function emitNode(node: SvgNode, ctx: Ctx, opts: { skipTransform?: boolean; dept
     ctx.warnings.add(`unsupported-${node.tagName}`, UNSUPPORTED_ELEMENTS[node.tagName], node.label);
     return null;
   }
-  if (depth > 0 && needsLayer(node, ctx)) {
-    ctx.warnings.add('nested-layer-feature', 'Clip/filter on an element nested inside a shape group cannot be represented; ignored', node.label);
+  if (staticValue(node, 'mask')?.startsWith('url(')) ctx.warnings.add('mask', '<mask> is not supported and was ignored (use clip-path for hard-edged clipping)', node.label);
+  const handledAsLayer = depth === 0 && needsLayer(node, ctx);
+  if (!handledAsLayer) {
+    const filter = staticValue(node, 'filter');
+    const blur = filter && filter !== 'none' ? blurFilter(node, ctx) : 'none';
+    const cp = clipPathTarget(node, ctx);
+    if (typeof blur === 'object' && !ctx.blur) ctx.warnings.add('filter', 'Blur filter dropped (blur output disabled)', node.label);
+    else if (typeof blur === 'object' || (cp && !isTrivialClip(node, cp, ctx))) {
+      ctx.warnings.add('nested-layer-feature', 'Clip/filter on an element nested inside a shape group cannot be represented; ignored', node.label);
+    }
   }
-  if (staticValue(node, 'mask')?.startsWith('url(') && depth > 0) ctx.warnings.add('mask', '<mask> is not supported and was ignored', node.label);
   const levels = opts.skipTransform ? [] : transformChain(node, ctx);
   const opacity: Animatable<number> = opts.skipTransform ? { static: 1 } : opacityAnim(node, 'opacity', ctx);
   let content: unknown[] = [];
