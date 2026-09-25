@@ -24,6 +24,7 @@ Other transform function lists work too. Matrices are decomposed (info `transfor
 - Elements: `path` (all commands, including arcs), `rect` (+`rx`/`ry`), `circle`, `ellipse`, `line`, `polyline`, `polygon`, `g`, `use`, nested `svg`. A rect with different `rx`/`ry` becomes a path.
 - Paint: fill/stroke colours including `currentColor`, `fill-opacity`, `stroke-opacity`, `opacity`, `fill-rule`, `stroke-linecap`/`linejoin`/`miterlimit`, `stroke-dasharray` (static), `stroke-dashoffset` (animatable when a dasharray is set), and `paint-order`.
 - Gradients: linear and radial, in `userSpaceOnUse` or `objectBoundingBox` units, with `gradientTransform`, stop opacity and `href` inheritance. bbox gradients follow animated geometry.
+- Text: `<text>`/`<tspan>` are outlined with real fonts. See [text-and-fonts.md](text-and-fonts.md).
 - Clip paths: static `userSpaceOnUse` shapes become Lottie layer masks. Multiple shapes become additive masks.
 - Animatable, through CSS or SMIL: transform, opacity, fill, stroke, `*-opacity`, `stroke-width`, `stroke-dashoffset`, geometry (`x`, `y`, `width`, `height`, `rx`, `ry`, `cx`, `cy`, `r`), and `d` / `points` morphs (CSS `d: path("…")` also works).
 - SMIL `animateTransform`: translate, scale, rotate (with centre), skewX, and `additive="sum"`.
@@ -34,7 +35,7 @@ Other transform function lists work too. Matrices are decomposed (info `transfor
 
 - **Composition length** is the LCM of all infinite loop periods, where an `alternate` loop counts as 2 × its duration. If that LCM exceeds `--max-duration` (default 30s), the converter uses the longest loop and raises warning `loop-mismatch`, and the shorter loops won't line up at the seam. The length is then extended to the end of the longest finite animation (delay + duration × iterations).
 - Lottie players loop the whole composition, so every finite animation replays each time the composition restarts.
-- **Infinite loop with a delay (positive or negative)**: converted to its steady-state loop, as if it had been running since before frame 0. It becomes a phase offset, and the first cycle's wait is not reproduced. This is info `loop-delay`. Use it for staggered loops. For a visible pause, put hold keyframes inside the loop.
+- **Infinite loop with a delay (positive or negative)**: converted to its steady-state loop, as if it had been running since before frame 0. It becomes a phase offset, and the first cycle's wait is not reproduced. This is info `loop-delay`. `pnpm verify` samples the browser one loop later, so these compare against the steady state. Use it for staggered loops. For a visible pause, put hold keyframes inside the loop.
 - **Finite animation with a delay**: before the delay it shows the base value, or the first keyframe if `animation-fill-mode` is `backwards`/`both`. Without `forwards`/`both` it snaps back to the base value at the end. Figma Motion one-shots should use `both`.
 - **Mixed one-shot and loop**: nothing warns when the loop period doesn't divide the composition length. For example, a 2s loop plus a 5s one-shot makes a 5s composition, and the loop jumps at the seam.
 - SMIL `begin` must be a clock value. Event or syncbase begins start at 0 (`smil-begin`). `accumulate="sum"` is ignored (`smil-accumulate`).
@@ -43,7 +44,8 @@ Other transform function lists work too. Matrices are decomposed (info `transfor
 
 | Feature | Code | Severity |
 |---|---|---|
-| `<text>` (on `main`; see text-and-fonts.md) | `unsupported-text` | warning |
+| Text: missing font, missing glyphs, weight with no matching face (no faux bold) | `font-missing`, `glyph-missing`, `font-synthetic-bold` | warning |
+| Text: `textPath`, `textLength`, decoration, vertical/RTL, `font-variant`, animated `x`/`y`/`font-size`/spacing | `text-path`, `text-length`, `text-decoration`, `text-vertical`, `text-direction`/`text-bidi`, `font-variant`, `text-animation` | warning |
 | `<image>`, `<foreignObject>` | `unsupported-image`, `unsupported-foreignObject` | warning |
 | `<mask>` | `mask` | warning |
 | Pattern fill / missing paint server | `paint-server` | warning |

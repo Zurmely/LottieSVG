@@ -9,7 +9,7 @@ The converter (`packages/core`, CLI in `packages/cli`) reads Figma Motion's anim
 
 Reference files:
 - [references/feature-support.md](references/feature-support.md): full support matrix, warning codes, loop and timeline rules.
-- [references/text-and-fonts.md](references/text-and-fonts.md): text and font guidance (outlining is **pending [PR #2](https://github.com/Zurmely/LottieSVG/pull/2)**).
+- [references/text-and-fonts.md](references/text-and-fonts.md): live text outlined with real fonts, font sources, weights, spacing, and live vs pre-outlined text.
 - [references/example-loop.svg](references/example-loop.svg): a small Figma-style export that converts with 0 warnings and passes `pnpm verify`.
 
 ## Do
@@ -40,10 +40,12 @@ These are reported as warnings, so `--strict` fails:
 - Two animations on the same property of one layer (`multiple-animations`). Only the last is kept.
 - Interaction or event triggers, such as on click or after another animation (`smil-begin`). Everything starts at 0s.
 - Blur or clip on a layer nested inside a plain group that is otherwise flattened into shapes (`nested-layer-feature`).
+- Fonts that can't be found (`font-missing`, and the text is skipped). Also avoid weights the font doesn't have (`font-synthetic-bold`, since there is no faux bold) and characters missing from the font (`glyph-missing`).
+- Text on a path, fixed text width (`textLength`), underline or strikethrough, vertical or RTL text, and animated text `x`/`y`/`font-size`/`letter-spacing`.
 
 These are **not** caught by `--strict`, so check them yourself:
 - Blend modes other than Normal are dropped silently.
-- A start delay on a **looping** layer is only an info note (`loop-delay`). The first cycle's wait is lost, and the layer plays as a phase-shifted loop from frame 0.
+- A start delay on a **looping** layer is only an info note (`loop-delay`). The first cycle's wait is lost, and the layer plays as a phase-shifted loop from frame 0. `pnpm verify` compares against the browser one loop later, so it passes too.
 - Mixing a one-shot (non-looping) animation with loops. The composition runs until the one-shot ends. A loop whose period doesn't divide that length jumps at the seam, with no warning.
 - CSS `offset-path`, animated `visibility`, and the individual `rotate`/`scale`/`translate` CSS properties are ignored silently. Figma Motion doesn't normally emit them. Don't hand-edit them in.
 - Blur is an info note (`blur-effect`). It passes `--strict` but isn't rendered by every Lottie player.
@@ -52,7 +54,7 @@ These are **not** caught by `--strict`, so check them yourself:
 
 - Export the animated frame as **SVG** from Figma Motion, at 1x with the frame's own size. The converter uses the root `viewBox` and `width`/`height`.
 - **Include "id" attribute**: on, for readable layer names.
-- **Outline text**: on, until [PR #2](https://github.com/Zurmely/LottieSVG/pull/2) lands. Without it, current `main` drops text with `unsupported-text`. See [references/text-and-fonts.md](references/text-and-fonts.md) for what changes after that PR.
+- **Outline text**: off, so text stays live. The converter outlines it with the real font and keeps the string as the accessible label. Turn it on only in the cases listed in [references/text-and-fonts.md](references/text-and-fonts.md).
 - **Simplify stroke**: on, and prefer **Center** stroke alignment. Inside and outside strokes can export as masks or clips.
 - Don't post-process the SVG with an optimizer such as SVGO. It can rewrite the transform keyframes into matrices or strip ids.
 
@@ -67,6 +69,7 @@ pnpm verify path/to/anim.svg --frames 24                                     # P
 
 - `--strict` exits 1 if any **warning** is reported. Read the `info` lines too, because `loop-delay` and `blur-effect` still pass.
 - `pnpm verify` renders the SVG in headless Chrome and compares it against lottie-web and the dotLottie player at N frames. It fails when any frame differs by more than `--threshold` (default 1.5% of pixels). Output goes to `verify-output/<name>/`: a report and a contact sheet showing SVG | lottie-web | dotLottie | diffs. Set `CHROME_PATH` if Chrome isn't at `/usr/local/bin/google-chrome`.
+- With text, pass the same `--fonts <dir>` to both commands. Add `--no-google-fonts` for offline or reproducible builds, and `--alt "…"` to override the accessible label.
 - Other useful flags: `--fps <n>` (default 60), `--max-duration <s>` (loop cap, default 30), `--format both`, and a directory input for batch conversion.
 
 ## Checklist
@@ -77,7 +80,7 @@ pnpm verify path/to/anim.svg --frames 24                                     # P
 - [ ] No one-shot animations mixed with loops, unless the loop period divides the total length.
 - [ ] Path morphs keep the same point count. Corner-radius animations use a uniform radius.
 - [ ] Blend modes are Normal.
-- [ ] Text is outlined, or follows [references/text-and-fonts.md](references/text-and-fonts.md).
+- [ ] Text uses a concrete family that you supply or that is on Google Fonts, at a weight the font really has. No underline, text on a path, RTL or vertical text.
 - [ ] Exported as SVG with ids, simplified strokes and no optimizer.
 - [ ] `svg2lottie … --strict` exits 0, and the `info` lines have been reviewed.
 - [ ] `pnpm verify …` prints `PASS`.
