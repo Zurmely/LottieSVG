@@ -1,0 +1,25 @@
+<svg width="200" height="120" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff7e5f"/>
+      <stop offset="1" stop-color="#feb47b"/>
+    </linearGradient>
+    <linearGradient id="linUser" gradientUnits="userSpaceOnUse" x1="110" y1="10" x2="190" y2="10">
+      <stop offset="0%" stop-color="#43cea2"/>
+      <stop offset="50%" stop-color="#185a9d" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#43cea2"/>
+    </linearGradient>
+    <radialGradient id="rad" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#6a3093"/>
+    </radialGradient>
+    <linearGradient id="strokeGrad" href="#lin" gradientTransform="rotate(90 0.5 0.5)"/>
+  </defs>
+  <rect width="200" height="120" fill="#222"/>
+  <rect x="10" y="10" width="80" height="45" fill="url(#lin)"/>
+  <rect x="110" y="10" width="80" height="45" rx="10" fill="url(#linUser)"/>
+  <circle cx="50" cy="88" r="25" fill="url(#rad)">
+    <animate attributeName="r" values="25;20;25" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <rect x="115" y="68" width="70" height="40" fill="none" stroke="url(#strokeGrad)" stroke-width="6"/>
+</svg>

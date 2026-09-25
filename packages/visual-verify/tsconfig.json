@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@svg2lottie/core": [
+        "../core/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}

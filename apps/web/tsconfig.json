@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "declaration": false,
+    "paths": { "@svg2lottie/core": ["../../packages/core/src/index.ts"] }
+  },
+  "include": ["src", "vite.config.ts"]
+}

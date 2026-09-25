@@ -1,0 +1,18 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="circleClip"><circle cx="100" cy="100" r="70"/></clipPath>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+  </defs>
+  <rect width="200" height="200" fill="#0b132b"/>
+  <g clip-path="url(#circleClip)">
+    <rect x="0" y="0" width="200" height="200" fill="#1c2541"/>
+    <rect x="20" y="80" width="160" height="40" fill="#5bc0be">
+      <animateTransform attributeName="transform" type="rotate" values="0 100 100;180 100 100" dur="3s" repeatCount="indefinite"/>
+    </rect>
+    <g filter="url(#soft)">
+      <circle cx="100" cy="100" r="25" fill="#ffd166">
+        <animate attributeName="opacity" values="1;0.4;1" dur="1.5s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+  </g>
+</svg>

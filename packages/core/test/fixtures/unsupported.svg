@@ -1,0 +1,16 @@
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="m"><rect width="60" height="60" fill="white"/></mask>
+    <filter id="shadow"><feOffset dy="4"/><feGaussianBlur stdDeviation="2"/><feBlend in="SourceGraphic"/></filter>
+    <pattern id="p" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="red"/></pattern>
+  </defs>
+  <rect width="120" height="120" fill="#eee"/>
+  <text x="10" y="20">Hello</text>
+  <image href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkaPhfDwAEwQHwZ1LNVQAAAABJRU5ErkJggg==" width="10" height="10"/>
+  <rect x="10" y="30" width="40" height="40" fill="#333" mask="url(#m)"/>
+  <rect x="60" y="30" width="40" height="40" fill="url(#p)"/>
+  <circle cx="30" cy="95" r="12" fill="#09f" filter="url(#shadow)"/>
+  <circle cx="80" cy="95" r="6" fill="#f60">
+    <animateMotion path="M0 0 L20 0" dur="2s" repeatCount="indefinite"/>
+  </circle>
+</svg>

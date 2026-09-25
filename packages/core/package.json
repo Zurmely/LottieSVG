@@ -1,0 +1,30 @@
+{
+  "name": "@svg2lottie/core",
+  "version": "0.1.0",
+  "description": "Convert animated SVG (Figma Motion, CSS keyframes, SMIL) to Lottie and dotLottie",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "^0.9.12",
+    "css-tree": "^3.2.1",
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "@types/css-tree": "^3.2.0",
+    "tsup": "^8.5.1"
+  },
+  "license": "MIT"
+}

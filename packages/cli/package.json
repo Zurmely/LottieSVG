@@ -1,0 +1,22 @@
+{
+  "name": "svg2lottie",
+  "version": "0.1.0",
+  "description": "CLI: convert animated SVG to Lottie JSON / dotLottie",
+  "type": "module",
+  "bin": { "svg2lottie": "./dist/cli.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@svg2lottie/core": "workspace:*",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15"
+  },
+  "license": "MIT"
+}
