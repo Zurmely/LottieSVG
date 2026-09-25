@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { margin: 0; background: #fff; display: flex; gap: 8px; padding: 8px; }
+      .cell { position: relative; overflow: hidden; background: #fff; }
+      .cell > svg, .cell > canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="svg" class="cell"></div>
+    <div id="lw" class="cell"></div>
+    <div id="dl" class="cell"><canvas id="dlcanvas"></canvas></div>
+    <script src="/lottie.js"></script>
+    <script type="module">
+      import { DotLottie } from '/dotlottie.js';
+      DotLottie.setWasmUrl('/dotlottie-player.wasm');
+      const params = new URLSearchParams(location.search);
+      const W = Number(params.get('w'));
+      const H = Number(params.get('h'));
+      for (const id of ['svg', 'lw', 'dl']) Object.assign(document.getElementById(id).style, { width: W + 'px', height: H + 'px' });
+
+      const svgText = await (await fetch('/input.svg')).text();
+      const host = document.getElementById('svg');
+      host.innerHTML = svgText;
+      const svgEl = host.querySelector('svg');
+      svgEl.setAttribute('width', W);
+      svgEl.setAttribute('height', H);
+
+      const animationData = await (await fetch('/anim.json')).json();
+      const lw = lottie.loadAnimation({
+        container: document.getElementById('lw'),
+        renderer: params.get('renderer') || 'svg',
+        loop: false,
+        autoplay: false,
+        animationData,
+      });
+
+      const canvas = document.getElementById('dlcanvas');
+      canvas.width = W;
+      canvas.height = H;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      const dl = new DotLottie({
+        canvas,
+        src: '/anim.lottie',
+        autoplay: false,
+        loop: false,
+        useFrameInterpolation: true,
+        renderConfig: { devicePixelRatio: 1, autoResize: false, freezeOnOffscreen: false },
+      });
+      await new Promise((resolve, reject) => {
+        dl.addEventListener('load', resolve);
+        dl.addEventListener('loadError', (e) => reject(new Error('dotLottie load error: ' + JSON.stringify(e.error?.message ?? e))));
+      });
+      await new Promise((r) => (lw.isLoaded ? r() : lw.addEventListener('DOMLoaded', r)));
+
+      const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      window.seek = async (frame, fps) => {
+        const t = frame / fps;
+        for (const a of document.getAnimations()) {
+          a.pause();
+          a.currentTime = t * 1000;
+        }
+        svgEl.pauseAnimations();
+        svgEl.setCurrentTime(t);
+        lw.goToAndStop(frame, true);
+        dl.setFrame(frame);
+        await raf();
+        return { dlFrame: dl.currentFrame, lwFrame: lw.currentFrame };
+      };
+      window.ready = true;
+    </script>
+  </body>
+</html>

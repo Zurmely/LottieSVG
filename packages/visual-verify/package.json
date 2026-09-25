@@ -1,0 +1,22 @@
+{
+  "name": "@svg2lottie/visual-verify",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "tsx src/verify.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@lottiefiles/dotlottie-web": "^0.80.0",
+    "@svg2lottie/core": "workspace:*",
+    "lottie-web": "^5.13.0",
+    "pixelmatch": "^7.2.0",
+    "playwright-core": "^1.63.0",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.23.15"
+  }
+}
